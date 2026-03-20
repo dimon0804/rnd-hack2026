@@ -19,7 +19,7 @@ docker/
 
 Инфраструктура поднимается через `docker-compose`: PostgreSQL, Redis, Adminer, Nginx, **api-gateway**, **auth-service**, **document-service**, **rag-service**, **ai-service** (общий volume для загрузок).
 
-Распределение ролей: [`docs/TEAM.md`](docs/TEAM.md). Git-процесс: [`CONTRIBUTING.md`](CONTRIBUTING.md).
+Распределение ролей: [`docs/TEAM.md`](docs/TEAM.md). Git-процесс: [`CONTRIBUTING.md`](CONTRIBUTING.md). Mistral (модели, ключ): [`docs/MISTRAL_MODELS.md`](docs/MISTRAL_MODELS.md).
 
 ## Быстрый старт (локально)
 

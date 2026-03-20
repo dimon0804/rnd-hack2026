@@ -1,6 +1,6 @@
 # ai-service
 
-Вызовы Mistral API, единая обёртка над моделями и токенами.
+Интеграция с **La Plateforme** через официальный пакет **`mistralai`** (`mistral.chat.complete_async`). См. каталог моделей: [`docs/MISTRAL_MODELS.md`](../../docs/MISTRAL_MODELS.md).
 
 ## Эндпоинты
 
