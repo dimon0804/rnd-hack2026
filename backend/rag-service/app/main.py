@@ -19,7 +19,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="AI Platform RAG Service",
         version="0.1.0",
-        description="Ingest stub + TF-IDF index/query (in-memory).",
+        description="Ingest (извлечение текста + TF-IDF) и query (in-memory).",
         lifespan=lifespan,
     )
     app.include_router(health_router)

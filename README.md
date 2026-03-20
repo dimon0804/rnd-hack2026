@@ -32,7 +32,8 @@ docker compose up -d --build
 
 - API Gateway: `http://localhost:8000` (напрямую) или через Nginx: `http://localhost`
 - document-service (напрямую): `http://localhost:8002` · rag-service: `http://localhost:8003` · ai-service: `http://localhost:8004`
-- **Frontend без локального Node:** `docker compose --profile dev up -d --build` → UI на `http://localhost:3000` (прокси на `api-gateway` внутри сети Docker).
+- **Frontend без локального Node:** `docker compose --profile dev up -d --build` → UI на **`http://localhost:3000`** (прокси на `api-gateway` внутри сети Docker). Образ монтирует папку `./frontend` с хоста — изменения в коде подхватываются Vite без пересборки; после смены **зависимостей** (`package.json`) пересоберите образ: `docker compose --profile dev build --no-cache frontend` и при необходимости удалите volume `frontend_node_modules` (`docker volume rm rnd-hack26_frontend_node_modules` или имя из `docker volume ls`).
+- **Важно:** стандартный `docker compose up -d` **без** `--profile dev` **не поднимает** контейнер фронта. UI на порту **80** (Nginx) сейчас проксирует только **API**, не React — открывайте **`http://localhost:3000`** с включённым профилем `dev`.
 - **Frontend с локальным npm:** установите [Node.js LTS](https://nodejs.org/) или `winget install OpenJS.NodeJS.LTS`. В PowerShell: **`. .\tools\use-node-path.ps1`** (dot-source — иначе `node` не попадёт в PATH для postinstall-скриптов), затем `cd frontend && npm ci && npm run dev`. Новые терминалы в Cursor/VS Code подхватывают [`.vscode/settings.json`](.vscode/settings.json).
 - Adminer: `http://localhost:8080` (сервер `postgres`, пользователь/БД из `.env`)
 
@@ -59,12 +60,12 @@ docker compose up -d --build
 - **api-gateway:** прокси на `/api/v1/auth/*`, `/api/v1/documents/*`, `/api/v1/rag/*`, `/api/v1/ai/*`
 - **auth-service:** JWT, register / login / refresh / logout
 - **document-service:** загрузка PDF/DOCX/TXT, метаданные в БД, вызов **rag** `ingest` после сохранения
-- **rag-service:** `ingest` (stub) + TF-IDF `index` / `query` (in-memory)
-- **ai-service:** Mistral `POST /api/v1/ai/chat`
-- **frontend:** страница загрузки (Vite + React)
+- **rag-service:** `ingest` — извлечение текста (pypdf / python-docx / TXT), чанкинг, TF-IDF индекс в памяти; `index` / `query` для ручного вызова
+- **ai-service:** `POST /api/v1/ai/chat` — Mistral SDK или OpenAI-совместимый HTTP (`LLM_MODE`, см. [`docs/MISTRAL_MODELS.md`](docs/MISTRAL_MODELS.md))
+- **frontend:** Vite + React — главная, `/login`, `/register`, `/upload`, **`/workspace/:documentId`** (рабочая область: кратко, чат по документу с источниками, тесты, карточки; `/chat` редиректит на загрузку)
 
 Проверка auth: `POST http://localhost:8000/api/v1/auth/register` с JSON `{"email":"a@b.c","password":"password12"}`.
 
 Загрузка через gateway: `POST http://localhost:8000/api/v1/documents/upload` (`multipart/form-data`, поле `file`). Для dev можно `ALLOW_ANONYMOUS_UPLOAD=true` в compose.
 
-Следующий шаг: читать текст из файла после upload и дергать `/api/v1/rag/index`, generation-service, чат с RAG.
+**Что дальше** — см. [`docs/ROADMAP.md`](docs/ROADMAP.md) (RAG после парсинга файла, чат, generation-service, роли).

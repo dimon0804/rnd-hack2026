@@ -1,5 +1,7 @@
 def split_text(text: str, chunk_size: int, chunk_overlap: int) -> list[str]:
     clean = " ".join(text.split())
+    if not clean:
+        return []
     if len(clean) <= chunk_size:
         return [clean]
 

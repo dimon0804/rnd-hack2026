@@ -21,21 +21,37 @@ class InMemoryVectorStore:
     def add_document_chunks(self, document_id: str, chunks: list[str]) -> int:
         existing = [c for c in self._chunks if c.document_id != document_id]
         self._chunks = existing
+        if not chunks:
+            self._rebuild_index()
+            return 0
         self._chunks.extend(
             StoredChunk(document_id=document_id, chunk_id=i, text=chunk) for i, chunk in enumerate(chunks)
         )
         self._rebuild_index()
         return len(chunks)
 
-    def query(self, query: str, top_k: int) -> list[tuple[StoredChunk, float]]:
+    def query(
+        self,
+        query: str,
+        top_k: int,
+        allowed_document_ids: set[str] | None = None,
+    ) -> list[tuple[StoredChunk, float]]:
         if not self._chunks or self._matrix is None:
             return []
         q = self._vectorizer.transform([query])
         sims = cosine_similarity(q, self._matrix)[0]
         if sims.size == 0:
             return []
-        top_idx = np.argsort(sims)[::-1][:top_k]
-        return [(self._chunks[i], float(sims[i])) for i in top_idx if sims[i] > 0]
+        pairs: list[tuple[int, float]] = []
+        for i, score in enumerate(sims):
+            if score <= 0:
+                continue
+            if allowed_document_ids is not None and self._chunks[i].document_id not in allowed_document_ids:
+                continue
+            pairs.append((i, float(score)))
+        pairs.sort(key=lambda x: -x[1])
+        out = pairs[:top_k]
+        return [(self._chunks[i], score) for i, score in out]
 
     def _rebuild_index(self) -> None:
         if not self._chunks:

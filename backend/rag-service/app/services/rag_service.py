@@ -12,8 +12,9 @@ class RagService:
         count = self._store.add_document_chunks(document_id=document_id, chunks=chunks)
         return IndexDocumentResponse(document_id=document_id, chunks_indexed=count)
 
-    def query(self, query_text: str, top_k: int) -> QueryResponse:
-        rows = self._store.query(query=query_text, top_k=top_k)
+    def query(self, query_text: str, top_k: int, document_ids: list[str] | None = None) -> QueryResponse:
+        allowed = set(document_ids) if document_ids is not None else None
+        rows = self._store.query(query=query_text, top_k=top_k, allowed_document_ids=allowed)
         return QueryResponse(
             results=[
                 ChunkResult(

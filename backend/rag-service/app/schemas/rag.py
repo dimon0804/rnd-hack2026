@@ -16,6 +16,10 @@ class IndexDocumentResponse(BaseModel):
 class QueryRequest(BaseModel):
     query: str = Field(min_length=2)
     top_k: int = Field(default=4, ge=1, le=20)
+    document_ids: list[str] | None = Field(
+        default=None,
+        description="Ограничить поиск чанками этих document_id (документы текущего пользователя).",
+    )
 
 
 class ChunkResult(BaseModel):

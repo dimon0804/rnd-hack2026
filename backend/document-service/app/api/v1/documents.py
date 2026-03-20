@@ -53,12 +53,15 @@ async def upload_document(
     db.refresh(doc)
 
     client: httpx.AsyncClient = request.app.state.http_client
-    err = await notify_ingest_safe(client, doc.id, doc.storage_path, doc.mime_type, user_id)
-    if err:
-        doc.status = DocumentStatus.failed.value
-        doc.status_message = err[:1000]
+    outcome = await notify_ingest_safe(client, doc.id, doc.storage_path, doc.mime_type, user_id)
+    if outcome.success:
+        doc.status = DocumentStatus.ready.value
+        doc.status_message = outcome.detail[:1000] if outcome.detail else None
+        upload_msg = outcome.detail or f"Проиндексировано фрагментов: {outcome.chunks_indexed}"
     else:
-        doc.status = DocumentStatus.queued.value
+        doc.status = DocumentStatus.failed.value
+        doc.status_message = outcome.detail[:1000]
+        upload_msg = outcome.detail or "Не удалось проиндексировать документ"
     db.add(doc)
     db.commit()
     db.refresh(doc)
@@ -69,7 +72,7 @@ async def upload_document(
         mime_type=doc.mime_type,
         size_bytes=doc.size_bytes,
         status=doc.status,
-        message="Uploaded and queued for indexing" if not err else "Stored but RAG handoff failed",
+        message=upload_msg,
     )
 
 

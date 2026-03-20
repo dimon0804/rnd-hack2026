@@ -13,18 +13,13 @@ function apiBase(): string {
 
 export async function uploadDocument(
   file: File,
-  token?: string | null,
+  authFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>,
 ): Promise<DocumentUploadResult> {
   const form = new FormData();
   form.append("file", file);
-  const headers: HeadersInit = {};
-  if (token) {
-    headers.Authorization = `Bearer ${token}`;
-  }
-  const res = await fetch(`${apiBase()}/api/v1/documents/upload`, {
+  const res = await authFetch(`${apiBase()}/api/v1/documents/upload`, {
     method: "POST",
     body: form,
-    headers,
   });
   if (!res.ok) {
     const text = await res.text();
@@ -43,15 +38,25 @@ export type DocumentItem = {
   created_at: string;
 };
 
-export async function listDocuments(token?: string | null): Promise<DocumentItem[]> {
-  const headers: HeadersInit = {};
-  if (token) {
-    headers.Authorization = `Bearer ${token}`;
-  }
-  const res = await fetch(`${apiBase()}/api/v1/documents`, { headers });
+export async function listDocuments(
+  authFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>,
+): Promise<DocumentItem[]> {
+  const res = await authFetch(`${apiBase()}/api/v1/documents`);
   if (!res.ok) {
     const text = await res.text();
     throw new Error(text || res.statusText);
   }
   return res.json() as Promise<DocumentItem[]>;
+}
+
+export async function getDocument(
+  id: string,
+  authFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>,
+): Promise<DocumentItem> {
+  const res = await authFetch(`${apiBase()}/api/v1/documents/${id}`);
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || res.statusText);
+  }
+  return res.json() as Promise<DocumentItem>;
 }
