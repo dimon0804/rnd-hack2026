@@ -44,3 +44,17 @@ export async function ragQuery(
   const data = (await res.json()) as { results: RagChunk[] };
   return data.results ?? [];
 }
+
+/** Все чанки документа по порядку (без TF-IDF) — надёжный контекст для саммари и карточек. */
+export async function ragDocumentChunks(
+  documentId: string,
+  authFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>,
+): Promise<RagChunk[]> {
+  const res = await authFetch(
+    `${apiBase()}/api/v1/rag/documents/${encodeURIComponent(documentId)}/chunks`,
+    { method: "GET" },
+  );
+  if (!res.ok) throw new Error(await parseError(res));
+  const data = (await res.json()) as { results: RagChunk[] };
+  return data.results ?? [];
+}

@@ -105,3 +105,10 @@ def query(body: QueryRequest, request: Request) -> QueryResponse:
         top_k=body.top_k,
         document_ids=body.document_ids,
     )
+
+
+@router.get("/documents/{document_id}/chunks", response_model=QueryResponse)
+def get_document_chunks(document_id: str, request: Request) -> QueryResponse:
+    """Все чанки документа по порядку (без TF-IDF). Для UI: саммари, карточки, когда query даёт пусто."""
+    rag_service = request.app.state.rag_service
+    return rag_service.chunks_for_document(document_id)

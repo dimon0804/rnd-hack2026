@@ -1,23 +1,31 @@
 import { aiChat } from "../api/ai";
-import { ragQuery } from "../api/rag";
+import { ragDocumentChunks, ragQuery, type RagChunk } from "../api/rag";
 
 const MAX_CTX = 12000;
 
 type AuthFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
 async function contextFromDocument(documentId: string, authFetch: AuthFetch): Promise<string> {
-  // Два запроса: общий + «плотный» по словам из текста — TF-IDF иногда даёт нули; на бэкенде есть fallback по document_id.
-  const q1 = await ragQuery("основное содержание документа ключевые разделы", authFetch, 16, [documentId]);
-  const seen = new Set(q1.map((c) => c.chunk_id));
-  const q2 = await ragQuery("текст содержание разделы выводы", authFetch, 16, [documentId]);
-  const merged = [...q1];
-  for (const c of q2) {
-    if (!seen.has(c.chunk_id)) {
-      seen.add(c.chunk_id);
-      merged.push(c);
-    }
+  // Сначала прямой список чанков (весь проиндексированный текст), без TF-IDF — иначе модель получала пустой контекст.
+  let merged: RagChunk[] = [];
+  try {
+    merged = await ragDocumentChunks(documentId, authFetch);
+  } catch {
+    merged = [];
   }
-  merged.sort((a, b) => a.chunk_id - b.chunk_id);
+  if (merged.length === 0) {
+    const q1 = await ragQuery("основное содержание документа ключевые разделы", authFetch, 16, [documentId]);
+    const seen = new Set(q1.map((c) => c.chunk_id));
+    const q2 = await ragQuery("текст содержание разделы выводы", authFetch, 16, [documentId]);
+    merged = [...q1];
+    for (const c of q2) {
+      if (!seen.has(c.chunk_id)) {
+        seen.add(c.chunk_id);
+        merged.push(c);
+      }
+    }
+    merged.sort((a, b) => a.chunk_id - b.chunk_id);
+  }
   let text = merged.map((c) => c.text).join("\n\n");
   if (text.length > MAX_CTX) text = text.slice(0, MAX_CTX) + "\n…";
   return text;
@@ -93,9 +101,26 @@ export async function runQuickAction(
 
 export async function generateFlashcards(documentId: string, authFetch: AuthFetch): Promise<{ q: string; a: string }[]> {
   const ctx = await contextFromDocument(documentId, authFetch);
-  const system =
-    "Сгенерируй 8 карточек для запоминания. Формат: каждая карточка две строки: В: вопрос и О: ответ. Русский.";
-  const res = await aiChat(`Текст:\n\n${ctx}`, system, authFetch, { maxTokens: 1800, temperature: 0.25 });
+  if (!ctx.trim()) {
+    return [
+      {
+        q: "Нет текста в индексе",
+        a: "Документ не найден в RAG или индекс пуст (например, после перезапуска сервиса). Загрузите файл снова и дождитесь статуса «Готово».",
+      },
+    ];
+  }
+  const system = `Ты помощник для учёбы. Ниже уже передан ПОЛНЫЙ текст документа — работай только с ним.
+НЕ проси пользователя прислать текст. НЕ отвечай отказом.
+Сгенерируй 8 карточек для запоминания по этому тексту. Только русский язык.
+Формат строго: для каждой карточки две строки:
+В: <краткий вопрос>
+О: <ответ>`;
+  const res = await aiChat(
+    `Текст документа для карточек:\n\n${ctx}`,
+    system,
+    authFetch,
+    { maxTokens: 1800, temperature: 0.25 },
+  );
   const out: { q: string; a: string }[] = [];
   const lines = res.content.split("\n");
   let q = "";
@@ -107,8 +132,19 @@ export async function generateFlashcards(documentId: string, authFetch: AuthFetc
       q = "";
     }
   }
-  if (out.length === 0) {
-    return [{ q: "Содержание", a: res.content.slice(0, 500) }];
+  if (out.length > 0) {
+    return out;
   }
-  return out;
+  const raw = res.content.trim();
+  const looksLikeRefusal =
+    /пришлите|пришли|отправьте|нет текста|не вижу текста|не предоставлен/i.test(raw);
+  if (looksLikeRefusal) {
+    return [
+      {
+        q: "Модель не вернула карточки",
+        a: "Повторите генерацию. Если снова пусто — сократите документ или проверьте ключ LLM в настройках.",
+      },
+    ];
+  }
+  return [{ q: "Карточки (свободный формат)", a: raw.slice(0, 1200) }];
 }

@@ -26,3 +26,11 @@ class RagService:
                 for row, score in rows
             ]
         )
+
+    def chunks_for_document(self, document_id: str) -> QueryResponse:
+        chunks = self._store.chunks_for_document(document_id)
+        return QueryResponse(
+            results=[
+                ChunkResult(document_id=c.document_id, chunk_id=c.chunk_id, score=1.0, text=c.text) for c in chunks
+            ]
+        )

@@ -35,6 +35,11 @@ class InMemoryVectorStore:
         self._rebuild_index()
         return len(chunks)
 
+    def chunks_for_document(self, document_id: str) -> list[StoredChunk]:
+        """Все чанки документа по порядку (без TF-IDF) — для саммари и карточек."""
+        nid = _norm_doc_id(document_id)
+        return sorted((c for c in self._chunks if c.document_id == nid), key=lambda c: c.chunk_id)
+
     def query(
         self,
         query: str,
