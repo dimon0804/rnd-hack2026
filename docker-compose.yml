@@ -76,6 +76,15 @@ services:
       - document_uploads:/data/uploads
     environment:
       UPLOAD_DIR: /data/uploads
+      RAG_ENABLE_DB: ${RAG_ENABLE_DB:-true}
+      POSTGRES_HOST: postgres
+      POSTGRES_USER: ${POSTGRES_USER:-app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-ai_platform}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   document-service:
     build:
