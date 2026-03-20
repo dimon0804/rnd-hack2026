@@ -25,7 +25,7 @@ class IngestRequest(BaseModel):
 
 
 class IngestResponse(BaseModel):
-    """Синхронная обработка: извлечение текста + чанкинг + TF-IDF."""
+    """Синхронная обработка: извлечение текста + чанкинг + индекс (TF-IDF или эмбеддер)."""
 
     status: str = Field(description="indexed | failed")
     document_id: str

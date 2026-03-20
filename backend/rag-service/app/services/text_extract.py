@@ -2,16 +2,20 @@
 
 from pathlib import Path
 
+from app.services.text_sanitize import sanitize_postgres_text
+
 
 def extract_text_from_file(mime_type: str, path: Path) -> str:
     mt = mime_type.split(";")[0].strip().lower()
     if mt == "application/pdf":
-        return _pdf(path)
-    if mt == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-        return _docx(path)
-    if mt == "text/plain":
-        return _txt(path)
-    raise ValueError(f"Неподдерживаемый тип: {mime_type}")
+        raw = _pdf(path)
+    elif mt == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+        raw = _docx(path)
+    elif mt == "text/plain":
+        raw = _txt(path)
+    else:
+        raise ValueError(f"Неподдерживаемый тип: {mime_type}")
+    return sanitize_postgres_text(raw)
 
 
 def _pdf(path: Path) -> str:

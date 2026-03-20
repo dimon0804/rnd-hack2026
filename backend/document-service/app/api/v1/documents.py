@@ -76,6 +76,47 @@ async def upload_document(
     )
 
 
+@router.post("/{document_id}/reindex", response_model=DocumentUploadResponse)
+async def reindex_document(
+    document_id: uuid.UUID,
+    request: Request,
+    db: Session = Depends(get_db),
+    user_id: int | None = Depends(get_current_user_id_optional),
+) -> DocumentUploadResponse:
+    """Повторная индексация в RAG с диска (после рестарта rag-service, пустого индекса и т.п.)."""
+    doc = db.get(Document, document_id)
+    if doc is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+    if doc.user_id is not None:
+        if user_id is None or user_id != doc.user_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+    elif not settings.allow_anonymous_upload and user_id is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+
+    client: httpx.AsyncClient = request.app.state.http_client
+    outcome = await notify_ingest_safe(client, doc.id, doc.storage_path, doc.mime_type, user_id)
+    if outcome.success:
+        doc.status = DocumentStatus.ready.value
+        doc.status_message = outcome.detail[:1000] if outcome.detail else None
+        msg = outcome.detail or f"Проиндексировано фрагментов: {outcome.chunks_indexed}"
+    else:
+        doc.status = DocumentStatus.failed.value
+        doc.status_message = outcome.detail[:1000]
+        msg = outcome.detail or "Не удалось проиндексировать документ"
+    db.add(doc)
+    db.commit()
+    db.refresh(doc)
+
+    return DocumentUploadResponse(
+        id=doc.id,
+        original_filename=doc.original_filename,
+        mime_type=doc.mime_type,
+        size_bytes=doc.size_bytes,
+        status=doc.status,
+        message=msg,
+    )
+
+
 @router.get("", response_model=list[DocumentResponse])
 def list_documents(
     db: Session = Depends(get_db),

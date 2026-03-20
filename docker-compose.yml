@@ -70,6 +70,9 @@ services:
       dockerfile: Dockerfile
     container_name: ai-platform-rag-service
     restart: unless-stopped
+    # host.docker.internal на Linux (эмбеддер на машине разработчика)
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "8003:8003"
     volumes:
@@ -82,6 +85,9 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app_secret}
       POSTGRES_DB: ${POSTGRES_DB:-ai_platform}
       POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      # Эмбеддер (vLLM OpenAI /v1/embeddings), с хоста Windows/Mac: host.docker.internal
+      EMBEDDER_BASE_URL: ${EMBEDDER_BASE_URL:-}
+      EMBEDDER_MODEL: ${EMBEDDER_MODEL:-}
     depends_on:
       postgres:
         condition: service_healthy

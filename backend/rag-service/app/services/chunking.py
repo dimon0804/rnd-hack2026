@@ -1,4 +1,8 @@
+from app.services.text_sanitize import sanitize_postgres_text
+
+
 def split_text(text: str, chunk_size: int, chunk_overlap: int) -> list[str]:
+    text = sanitize_postgres_text(text)
     clean = " ".join(text.split())
     if not clean:
         return []

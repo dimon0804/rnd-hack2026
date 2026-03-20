@@ -60,3 +60,18 @@ export async function getDocument(
   }
   return res.json() as Promise<DocumentItem>;
 }
+
+/** Повторная индексация в RAG с диска (если индекс пуст после рестарта и т.д.). */
+export async function reindexDocument(
+  id: string,
+  authFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>,
+): Promise<DocumentUploadResult> {
+  const res = await authFetch(`${apiBase()}/api/v1/documents/${encodeURIComponent(id)}/reindex`, {
+    method: "POST",
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || res.statusText);
+  }
+  return res.json() as Promise<DocumentUploadResult>;
+}

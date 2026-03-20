@@ -1,4 +1,4 @@
-"""Персистентное хранение чанков RAG в PostgreSQL (матрица TF-IDF пересобирается в памяти при старте)."""
+"""Персистентное хранение чанков RAG в PostgreSQL (индекс TF-IDF или эмбеддинги пересобирается в памяти при старте)."""
 
 from __future__ import annotations
 
@@ -9,7 +9,8 @@ from typing import TYPE_CHECKING
 import psycopg
 from psycopg.rows import tuple_row
 
-from app.services.vector_store import InMemoryVectorStore, _norm_doc_id
+from app.services.text_sanitize import sanitize_postgres_text
+from app.services.vector_store import InMemoryVectorStore, StoredChunk, _norm_doc_id
 
 if TYPE_CHECKING:
     from app.core.config import Settings
@@ -53,15 +54,25 @@ class ChunkRepository:
         logger.info("RAG chunks table ready in PostgreSQL")
 
     def save_document_chunks(self, document_id: str, chunks: list[str]) -> None:
+        """Сохранить чанки документа. UPSERT устраняет duplicate key при параллельном reindex."""
         nid = _norm_doc_id(document_id)
+        upsert = f"""
+            INSERT INTO {_TABLE} (document_id, chunk_id, chunk_text)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (document_id, chunk_id) DO UPDATE
+            SET chunk_text = EXCLUDED.chunk_text
+        """
         with self._connect() as conn:
             with conn.cursor() as cur:
-                cur.execute(f"DELETE FROM {_TABLE} WHERE document_id = %s", (nid,))
-                for i, text in enumerate(chunks):
+                if not chunks:
+                    cur.execute(f"DELETE FROM {_TABLE} WHERE document_id = %s", (nid,))
+                else:
                     cur.execute(
-                        f"INSERT INTO {_TABLE} (document_id, chunk_id, chunk_text) VALUES (%s, %s, %s)",
-                        (nid, i, text),
+                        f"DELETE FROM {_TABLE} WHERE document_id = %s AND chunk_id >= %s",
+                        (nid, len(chunks)),
                     )
+                    for i, text in enumerate(chunks):
+                        cur.execute(upsert, (nid, i, sanitize_postgres_text(text)))
             conn.commit()
 
     def delete_document(self, document_id: str) -> None:
@@ -88,16 +99,16 @@ class ChunkRepository:
 
 
 def load_persisted_into_store(store: InMemoryVectorStore, repo: ChunkRepository) -> int:
-    """Восстановить индекс в памяти из БД (пересборка TF-IDF внутри add_document_chunks)."""
+    """Восстановить индекс в памяти из БД (одна пересборка TF-IDF или эмбеддингов)."""
     grouped = repo.fetch_all_grouped()
     if not grouped:
         logger.info("No RAG chunks in database yet")
         return 0
-    total = 0
+    ordered: list[StoredChunk] = []
     for doc_id in sorted(grouped.keys()):
         parts = sorted(grouped[doc_id], key=lambda x: x[0])
-        texts = [t for _, t in parts]
-        store.add_document_chunks(doc_id, texts)
-        total += len(texts)
-    logger.info("Loaded %s chunks from PostgreSQL into RAG index", total)
-    return total
+        for chunk_id, text in parts:
+            ordered.append(StoredChunk(document_id=doc_id, chunk_id=chunk_id, text=text))
+    store.replace_all_chunks(ordered)
+    logger.info("Loaded %s chunks from PostgreSQL into RAG index", len(ordered))
+    return len(ordered)

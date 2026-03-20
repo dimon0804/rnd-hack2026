@@ -22,6 +22,13 @@ class Settings(BaseSettings):
     postgres_host: str = Field(default="localhost", alias="POSTGRES_HOST")
     postgres_port: int = Field(default=5432, alias="POSTGRES_PORT")
 
+    # Эмбеддер (OpenAI-совместимый POST /v1/embeddings), например vLLM на :6620.
+    # Пусто — только TF-IDF в памяти.
+    embedder_base_url: str | None = Field(default=None, alias="EMBEDDER_BASE_URL")
+    embedder_model: str | None = Field(default=None, alias="EMBEDDER_MODEL")
+    embedder_batch_size: int = Field(default=32, ge=1, le=256, alias="EMBEDDER_BATCH_SIZE")
+    embedder_timeout_seconds: float = Field(default=120.0, alias="EMBEDDER_TIMEOUT_SECONDS")
+
 
 @lru_cache
 def get_settings() -> Settings:

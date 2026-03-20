@@ -19,7 +19,7 @@ docker/
 
 Инфраструктура поднимается через `docker-compose`: PostgreSQL, Redis, Adminer, Nginx, **api-gateway**, **auth-service**, **document-service**, **rag-service**, **ai-service** (общий volume для загрузок).
 
-Распределение ролей: [`docs/TEAM.md`](docs/TEAM.md). Git-процесс: [`CONTRIBUTING.md`](CONTRIBUTING.md). Mistral (модели, ключ): [`docs/MISTRAL_MODELS.md`](docs/MISTRAL_MODELS.md).
+Распределение ролей: [`docs/TEAM.md`](docs/TEAM.md). Git-процесс: [`CONTRIBUTING.md`](CONTRIBUTING.md). Mistral (модели, ключ): [`docs/MISTRAL_MODELS.md`](docs/MISTRAL_MODELS.md). Соответствие формулировкам кейса (RAG, чат, подкаст, отчёт, mindmap): [`docs/CASE_REQUIREMENTS.md`](docs/CASE_REQUIREMENTS.md).
 
 ## Быстрый старт (локально)
 
@@ -60,7 +60,7 @@ docker compose up -d --build
 - **api-gateway:** прокси на `/api/v1/auth/*`, `/api/v1/documents/*`, `/api/v1/rag/*`, `/api/v1/ai/*`
 - **auth-service:** JWT, register / login / refresh / logout
 - **document-service:** загрузка PDF/DOCX/TXT, метаданные в БД, вызов **rag** `ingest` после сохранения
-- **rag-service:** `ingest` — извлечение текста (pypdf / python-docx / TXT), чанкинг; **чанки в PostgreSQL**, TF-IDF в памяти после загрузки из БД при старте; `index` / `query`
+- **rag-service:** `ingest` — извлечение текста (pypdf / python-docx / TXT), чанкинг; **чанки в PostgreSQL**; поиск в памяти — **TF-IDF** по умолчанию или **эмбеддер** (`EMBEDDER_BASE_URL`, `POST …/v1/embeddings`), если его выдал кейсодержатель (URL и модель — из их материалов; см. комментарии в `.env.example` и [`backend/rag-service/README.md`](backend/rag-service/README.md)); `index` / `query`
 - **ai-service:** `POST /api/v1/ai/chat` — Mistral SDK или OpenAI-совместимый HTTP (`LLM_MODE`, см. [`docs/MISTRAL_MODELS.md`](docs/MISTRAL_MODELS.md))
 - **frontend:** Vite + React — главная, `/login`, `/register`, `/upload`, **`/workspace/:documentId`** (рабочая область: кратко, чат по документу с источниками, тесты, карточки; `/chat` редиректит на загрузку)
 

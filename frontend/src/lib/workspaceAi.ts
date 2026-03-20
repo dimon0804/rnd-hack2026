@@ -1,19 +1,22 @@
 import { aiChat } from "../api/ai";
+import { reindexDocument } from "../api/documents";
 import { ragDocumentChunks, ragQuery, type RagChunk } from "../api/rag";
 
 const MAX_CTX = 12000;
 
 type AuthFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
-async function contextFromDocument(documentId: string, authFetch: AuthFetch): Promise<string> {
-  // Сначала прямой список чанков (весь проиндексированный текст), без TF-IDF — иначе модель получала пустой контекст.
+/** Чанки из RAG: сначала полный список по документу, иначе TF-IDF; ошибки сети не рвут поток. */
+async function fetchMergedChunks(documentId: string, authFetch: AuthFetch): Promise<RagChunk[]> {
   let merged: RagChunk[] = [];
   try {
     merged = await ragDocumentChunks(documentId, authFetch);
   } catch {
     merged = [];
   }
-  if (merged.length === 0) {
+  if (merged.length > 0) return merged;
+
+  try {
     const q1 = await ragQuery("основное содержание документа ключевые разделы", authFetch, 16, [documentId]);
     const seen = new Set(q1.map((c) => c.chunk_id));
     const q2 = await ragQuery("текст содержание разделы выводы", authFetch, 16, [documentId]);
@@ -25,6 +28,21 @@ async function contextFromDocument(documentId: string, authFetch: AuthFetch): Pr
       }
     }
     merged.sort((a, b) => a.chunk_id - b.chunk_id);
+  } catch {
+    merged = [];
+  }
+  return merged;
+}
+
+async function contextFromDocument(documentId: string, authFetch: AuthFetch): Promise<string> {
+  let merged = await fetchMergedChunks(documentId, authFetch);
+  if (merged.length === 0) {
+    try {
+      await reindexDocument(documentId, authFetch);
+      merged = await fetchMergedChunks(documentId, authFetch);
+    } catch {
+      /* reindex недоступен или нет прав — оставляем пустой контекст */
+    }
   }
   let text = merged.map((c) => c.text).join("\n\n");
   if (text.length > MAX_CTX) text = text.slice(0, MAX_CTX) + "\n…";
@@ -38,7 +56,11 @@ export async function generateSummaryAndTopics(documentId: string, authFetch: Au
 }> {
   const ctx = await contextFromDocument(documentId, authFetch);
   if (!ctx.trim()) {
-    return { summary: "Недостаточно текста в индексе для этого документа.", topics: [] };
+    return {
+      summary:
+        "Недостаточно текста в индексе для этого документа (повторная индексация не помогла или файл недоступен).",
+      topics: [],
+    };
   }
   const system = `Ты аналитик текстов. Отвечай только на русском. Формат ответа строго такой (без markdown-заголовков #):
 КРАТКО: (2–4 предложения суть документа)
@@ -63,14 +85,101 @@ export async function generateSummaryAndTopics(documentId: string, authFetch: Au
   return { summary, topics: topics.slice(0, 12) };
 }
 
+export type PodcastTone = "academic" | "popular";
+export type PodcastPace = "slow" | "normal" | "fast";
+
+/** Аудиопересказ: сценарий двух ведущих; тон и темп задают стиль и длину реплик. */
+export async function runPodcastAction(
+  documentId: string,
+  authFetch: AuthFetch,
+  opts: { tone: PodcastTone; pace: PodcastPace },
+): Promise<string> {
+  const ctx = await contextFromDocument(documentId, authFetch);
+  if (!ctx.trim()) {
+    return "Текст документа не найден в индексе RAG после повторной индексации. Проверьте статус документа или загрузите файл снова.";
+  }
+  const toneRu =
+    opts.tone === "academic"
+      ? "Научный стиль: точные формулировки, термины по делу, без лишних метафор."
+      : "Популярный стиль: простые объяснения, понятные аналогии, живой разговорный тон без канцелярита.";
+  const paceRu =
+    opts.pace === "slow"
+      ? "Темп медленный: развёрнутые реплики по 2–4 предложения, больше пояснений."
+      : opts.pace === "fast"
+        ? "Темп быстрый: короткие реплики по 1–2 предложения, динамичный диалог."
+        : "Темп умеренный: реплики по 1–3 предложения.";
+  const system = `Ты пишешь сценарий аудиоподкаста на русском. Два ведущих: Алексей и Мария.
+${toneRu}
+${paceRu}
+Формат строго: строки «Алексей: …» и «Мария: …». Всего 14–22 реплики, обсуждают содержание материала, не уходят в сторону.`;
+  const res = await aiChat(`Материал для обсуждения:\n\n${ctx}`, system, authFetch, {
+    maxTokens: 2400,
+    temperature: 0.38,
+  });
+  return res.content;
+}
+
+/** Официальная справка / резюме по шаблону (деловой стиль). */
+export async function generateOfficialReport(documentId: string, authFetch: AuthFetch): Promise<string> {
+  const ctx = await contextFromDocument(documentId, authFetch);
+  if (!ctx.trim()) {
+    return "Нет текста в индексе для формирования отчёта. Проверьте статус документа.";
+  }
+  const system = `Ты составитель официальных справок. Только русский, строго деловой стиль (внутренняя справка для руководства).
+Используй ровно такую структуру и заголовки:
+
+СПРАВКА
+ОБЪЕКТ: (одна строка — о чём документ)
+
+1. ЦЕЛЬ И ЗАДАЧА
+(2–4 предложения)
+
+2. КРАТКОЕ СОДЕРЖАНИЕ
+(структурированный пересказ основных разделов)
+
+3. КЛЮЧЕВЫЕ ПОЛОЖЕНИЯ
+(нумерованный список 4–7 пунктов)
+
+4. ВЫВОДЫ
+(3–5 предложений)
+
+5. РЕКОМЕНДАЦИИ
+(если в тексте нет основы — напиши: «В документе рекомендации не сформулированы»)
+
+Не используй markdown (#).`;
+  const res = await aiChat(`Исходные фрагменты документа:\n\n${ctx}`, system, authFetch, {
+    maxTokens: 2200,
+    temperature: 0.2,
+  });
+  return res.content;
+}
+
+/** Текст иерархии с отступами для парсинга в mindmap-граф. */
+export async function generateMindmapText(documentId: string, authFetch: AuthFetch): Promise<string> {
+  const ctx = await contextFromDocument(documentId, authFetch);
+  if (!ctx.trim()) return "";
+  const system = `Построй иерархию ключевых понятий для интеллект-карты. Только русский.
+Формат:
+- Каждая строка — одна тема; вложенность задаётся отступом из двух пробелов на уровень (не табуляция).
+- Корневые темы без отступа; подтемы с 2, 4, 6… пробелов в начале.
+- После отступа можно «- » перед названием.
+- Без заголовков #, без нумерации вида «1.», только многострочный список.
+- 12–28 строк, без дубликатов.`;
+  const res = await aiChat(`Текст документа:\n\n${ctx}`, system, authFetch, {
+    maxTokens: 1600,
+    temperature: 0.28,
+  });
+  return res.content.trim();
+}
+
 export async function runQuickAction(
-  kind: "simple" | "short" | "test" | "podcast" | "mindmap",
+  kind: "simple" | "short" | "test",
   documentId: string,
   authFetch: AuthFetch,
 ): Promise<string> {
   const ctx = await contextFromDocument(documentId, authFetch);
   if (!ctx.trim()) {
-    return "Текст документа не найден в индексе RAG. Перезагрузите файл или дождитесь статуса «Готово» и обновите страницу.";
+    return "Текст документа не найден в индексе RAG после повторной индексации. Проверьте статус документа или загрузите файл снова.";
   }
   const prompts: Record<typeof kind, { system: string; user: string }> = {
     simple: {
@@ -85,14 +194,6 @@ export async function runQuickAction(
       system: "Составь учебный тест на русском. Формат: для каждого вопроса номер, вопрос, строки А) Б) В) Г), затем строка «Правильно: буква».",
       user: `По тексту составь 5 вопросов с вариантами:\n\n${ctx}`,
     },
-    podcast: {
-      system: "Пиши сценарий подкаста на русском: два ведущих, короткие реплики.",
-      user: `Сделай диалог на 12–16 реплик о содержании:\n\n${ctx}`,
-    },
-    mindmap: {
-      system: "Выдай иерархию тем в виде вложенного списка с отступами (без JSON). Русский.",
-      user: `Построй структуру тем и подтем:\n\n${ctx}`,
-    },
   };
   const p = prompts[kind];
   const res = await aiChat(p.user, p.system, authFetch, { maxTokens: 2000, temperature: 0.35 });
@@ -105,7 +206,7 @@ export async function generateFlashcards(documentId: string, authFetch: AuthFetc
     return [
       {
         q: "Нет текста в индексе",
-        a: "Документ не найден в RAG или индекс пуст (например, после перезапуска сервиса). Загрузите файл снова и дождитесь статуса «Готово».",
+        a: "Индекс пуст или повторная индексация не сработала. Убедитесь, что документ в статусе «Готово», RAG и document-service доступны; при необходимости загрузите файл заново.",
       },
     ];
   }

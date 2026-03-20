@@ -3,12 +3,24 @@ import type { DocumentItem } from "../../api/documents";
 import { aiChat } from "../../api/ai";
 import { ragQuery } from "../../api/rag";
 import { documentStatusRu } from "../../lib/documentStatus";
-import { generateFlashcards, generateSummaryAndTopics, runQuickAction } from "../../lib/workspaceAi";
+import {
+  generateFlashcards,
+  generateMindmapText,
+  generateOfficialReport,
+  generateSummaryAndTopics,
+  runPodcastAction,
+  runQuickAction,
+  type PodcastPace,
+  type PodcastTone,
+} from "../../lib/workspaceAi";
+import { layoutMindmap, parseMindmapText, type MindLayoutNode } from "../../lib/mindmapParse";
+import { speakRussian, stopSpeaking } from "../../lib/speech";
 import { humanizeChatError } from "../../lib/apiError";
 import { useAuth } from "../../context/AuthContext";
+import { MindmapView } from "./MindmapView";
 import { ProcessingOverlay } from "./ProcessingOverlay";
 
-type Tab = "summary" | "chat" | "tests" | "flashcards";
+type Tab = "summary" | "report" | "chat" | "tests" | "flashcards" | "mindmap";
 
 type Msg = { role: "user" | "assistant"; content: string };
 
@@ -16,12 +28,10 @@ type Props = {
   document: DocumentItem;
 };
 
-const QUICK_LABELS: Record<"simple" | "short" | "test" | "podcast" | "mindmap", string> = {
+const QUICK_LABELS: Record<"simple" | "short" | "test", string> = {
   simple: "Объяснить просто",
   short: "Сделать кратко",
   test: "Тест",
-  podcast: "Подкаст",
-  mindmap: "Mindmap",
 };
 
 export function DocumentWorkspace({ document }: Props) {
@@ -41,6 +51,15 @@ export function DocumentWorkspace({ document }: Props) {
   const [cardsLoading, setCardsLoading] = useState(false);
   const [quickResult, setQuickResult] = useState<string | null>(null);
   const [quickKind, setQuickKind] = useState<string | null>(null);
+  const [reportText, setReportText] = useState<string | null>(null);
+  const [reportLoading, setReportLoading] = useState(false);
+  const [mindmapRoot, setMindmapRoot] = useState<MindLayoutNode | null>(null);
+  const [mindmapLoading, setMindmapLoading] = useState(false);
+  const [mindmapRaw, setMindmapRaw] = useState<string | null>(null);
+  const [podcastTone, setPodcastTone] = useState<PodcastTone>("popular");
+  const [podcastPace, setPodcastPace] = useState<PodcastPace>("normal");
+  const [podcastScript, setPodcastScript] = useState<string | null>(null);
+  const [podcastLoading, setPodcastLoading] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const st = document.status.trim().toLowerCase();
@@ -91,7 +110,7 @@ export function DocumentWorkspace({ document }: Props) {
     }
   };
 
-  const onQuick = async (kind: "simple" | "short" | "test" | "podcast" | "mindmap") => {
+  const onQuick = async (kind: "simple" | "short" | "test") => {
     if (!ready) return;
     setQuickKind(QUICK_LABELS[kind]);
     setQuickResult("Генерируем…");
@@ -100,6 +119,55 @@ export function DocumentWorkspace({ document }: Props) {
       setQuickResult(t);
     } catch (e) {
       setQuickResult(humanizeChatError(e instanceof Error ? e.message : "Ошибка"));
+    }
+  };
+
+  const onOfficialReport = async () => {
+    if (!ready) return;
+    setReportLoading(true);
+    try {
+      const t = await generateOfficialReport(document.id, authFetch);
+      setReportText(t);
+    } catch (e) {
+      setReportText(humanizeChatError(e instanceof Error ? e.message : "Ошибка"));
+    } finally {
+      setReportLoading(false);
+    }
+  };
+
+  const buildMindmap = async () => {
+    if (!ready) return;
+    setMindmapLoading(true);
+    setMindmapRoot(null);
+    setMindmapRaw(null);
+    try {
+      const raw = await generateMindmapText(document.id, authFetch);
+      setMindmapRaw(raw);
+      if (!raw.trim()) {
+        setMindmapRoot(null);
+        return;
+      }
+      const label = document.original_filename.replace(/\.[^.]+$/, "").slice(0, 48);
+      const tree = parseMindmapText(raw, label || "Документ");
+      setMindmapRoot(layoutMindmap(tree));
+    } catch (e) {
+      setMindmapRaw(humanizeChatError(e instanceof Error ? e.message : "Ошибка"));
+    } finally {
+      setMindmapLoading(false);
+    }
+  };
+
+  const onPodcast = async () => {
+    if (!ready) return;
+    setPodcastLoading(true);
+    setPodcastScript(null);
+    try {
+      const t = await runPodcastAction(document.id, authFetch, { tone: podcastTone, pace: podcastPace });
+      setPodcastScript(t);
+    } catch (e) {
+      setPodcastScript(humanizeChatError(e instanceof Error ? e.message : "Ошибка"));
+    } finally {
+      setPodcastLoading(false);
     }
   };
 
@@ -170,10 +238,13 @@ export function DocumentWorkspace({ document }: Props) {
           <button
             type="button"
             style={styles.mindBtn}
-            disabled={!ready}
-            onClick={() => void onQuick("mindmap")}
+            disabled={!ready || mindmapLoading}
+            onClick={() => {
+              setTab("mindmap");
+              void buildMindmap();
+            }}
           >
-            Сгенерировать mindmap
+            {mindmapLoading ? "Строим карту…" : "Открыть mindmap"}
           </button>
         </aside>
 
@@ -182,9 +253,11 @@ export function DocumentWorkspace({ document }: Props) {
             {(
               [
                 ["summary", "Кратко"],
+                ["report", "Отчёт"],
                 ["chat", "Чат"],
                 ["tests", "Тесты"],
                 ["flashcards", "Карточки"],
+                ["mindmap", "Mindmap"],
               ] as const
             ).map(([id, label]) => (
               <button
@@ -206,6 +279,26 @@ export function DocumentWorkspace({ document }: Props) {
               ) : (
                 <p style={styles.bodyText}>{summary ?? "—"}</p>
               )}
+            </div>
+          ) : null}
+
+          {tab === "report" ? (
+            <div style={styles.panel}>
+              <div style={styles.rowBetween}>
+                <h3 style={styles.panelTitle}>Формализованный отчёт</h3>
+                <button
+                  type="button"
+                  style={styles.genBtn}
+                  disabled={!ready || reportLoading}
+                  onClick={() => void onOfficialReport()}
+                >
+                  {reportLoading ? "…" : "Сформировать по шаблону"}
+                </button>
+              </div>
+              <p style={styles.muted}>
+                Деловая справка: цель, содержание, ключевые положения, выводы, рекомендации — по тексту документа из RAG.
+              </p>
+              <pre style={styles.pre}>{reportText ?? "Нажмите «Сформировать по шаблону»."}</pre>
             </div>
           ) : null}
 
@@ -290,6 +383,40 @@ export function DocumentWorkspace({ document }: Props) {
               </div>
             </div>
           ) : null}
+
+          {tab === "mindmap" ? (
+            <div style={styles.panel}>
+              <div style={styles.rowBetween}>
+                <h3 style={styles.panelTitle}>Интеллект-карта</h3>
+                <button type="button" style={styles.genBtn} disabled={!ready || mindmapLoading} onClick={() => void buildMindmap()}>
+                  {mindmapLoading ? "…" : "Перестроить"}
+                </button>
+              </div>
+              <p style={styles.muted}>
+                Интерактивный граф связей (клик по узлу). Данные из RAG; структура генерируется моделью.
+              </p>
+              {mindmapRoot && mindmapRoot.children.length > 0 ? (
+                <MindmapView root={mindmapRoot} />
+              ) : mindmapRoot && mindmapRoot.children.length === 0 && mindmapRaw ? (
+                <div>
+                  <p style={styles.muted}>Модель вернула текст, но иерархия не распознана. Сырой ответ:</p>
+                  <pre style={styles.pre}>{mindmapRaw}</pre>
+                </div>
+              ) : mindmapLoading ? (
+                <p style={styles.muted}>Строим структуру…</p>
+              ) : mindmapRaw && !mindmapRoot ? (
+                <pre style={styles.pre}>{mindmapRaw}</pre>
+              ) : (
+                <p style={styles.muted}>Нажмите «Перестроить» или кнопку слева.</p>
+              )}
+              {mindmapRaw && mindmapRoot && mindmapRoot.children.length > 0 ? (
+                <details style={{ marginTop: 12 }}>
+                  <summary style={styles.muted}>Исходный список</summary>
+                  <pre style={{ ...styles.pre, marginTop: 8, fontSize: "0.8rem" }}>{mindmapRaw}</pre>
+                </details>
+              ) : null}
+            </div>
+          ) : null}
         </main>
 
         <aside style={styles.right}>
@@ -304,11 +431,67 @@ export function DocumentWorkspace({ document }: Props) {
             <button type="button" style={styles.quickBtn} disabled={!ready} onClick={() => void onGenerateTests()}>
               Создать тест
             </button>
-            <button type="button" style={styles.quickBtn} disabled={!ready} onClick={() => void onQuick("podcast")}>
-              Сделать подкаст
-            </button>
-            <button type="button" style={styles.quickBtn} disabled={!ready} onClick={() => void onQuick("mindmap")}>
-              Mindmap
+            <div style={styles.podcastBox}>
+              <p style={styles.podcastTitle}>Аудиопересказ (сценарий)</p>
+              <label style={styles.lbl}>
+                Тон
+                <select
+                  style={styles.sel}
+                  value={podcastTone}
+                  disabled={!ready || podcastLoading}
+                  onChange={(e) => setPodcastTone(e.target.value as PodcastTone)}
+                >
+                  <option value="popular">Популярный</option>
+                  <option value="academic">Научный</option>
+                </select>
+              </label>
+              <label style={styles.lbl}>
+                Темп речи
+                <select
+                  style={styles.sel}
+                  value={podcastPace}
+                  disabled={!ready || podcastLoading}
+                  onChange={(e) => setPodcastPace(e.target.value as PodcastPace)}
+                >
+                  <option value="slow">Медленнее</option>
+                  <option value="normal">Норма</option>
+                  <option value="fast">Быстрее</option>
+                </select>
+              </label>
+              <button type="button" style={styles.quickBtn} disabled={!ready || podcastLoading} onClick={() => void onPodcast()}>
+                {podcastLoading ? "Генерация…" : "Сгенерировать диалог"}
+              </button>
+              {podcastScript ? (
+                <>
+                  <pre style={styles.podcastPre}>{podcastScript}</pre>
+                  <div style={styles.podcastActions}>
+                    <button
+                      type="button"
+                      style={styles.miniBtn}
+                      onClick={() => speakRussian(podcastScript, podcastPace)}
+                    >
+                      Озвучить в браузере
+                    </button>
+                    <button type="button" style={styles.miniBtnGhost} onClick={() => stopSpeaking()}>
+                      Стоп
+                    </button>
+                  </div>
+                </>
+              ) : null}
+              <p style={styles.podcastHint}>
+                Озвучка — Web Speech API (голос зависит от браузера и ОС). Для продакшена можно подключить TTS-сервис.
+              </p>
+            </div>
+            <button
+              type="button"
+              style={styles.quickBtn}
+              disabled={!ready || mindmapLoading}
+              onClick={() => {
+                setTab("mindmap");
+                void buildMindmap();
+              }}
+            >
+              Mindmap (граф)
             </button>
           </div>
           {quickResult ? (
@@ -483,6 +666,58 @@ const styles: Record<string, CSSProperties> = {
     alignSelf: "start",
   },
   quickList: { display: "flex", flexDirection: "column", gap: 8 },
+  podcastBox: {
+    padding: "10px 0",
+    borderTop: "1px solid var(--border)",
+    borderBottom: "1px solid var(--border)",
+    margin: "4px 0",
+    display: "flex",
+    flexDirection: "column",
+    gap: 8,
+  },
+  podcastTitle: { margin: 0, fontSize: "0.72rem", fontWeight: 700, textTransform: "uppercase", color: "var(--muted)" },
+  lbl: { display: "flex", flexDirection: "column", gap: 4, fontSize: "0.78rem", color: "var(--muted)" },
+  sel: {
+    padding: "6px 8px",
+    borderRadius: 8,
+    border: "1px solid var(--border)",
+    background: "rgba(255,255,255,0.05)",
+    color: "var(--text)",
+    fontSize: "0.85rem",
+  },
+  podcastPre: {
+    margin: 0,
+    maxHeight: 200,
+    overflow: "auto",
+    fontSize: "0.75rem",
+    whiteSpace: "pre-wrap",
+    lineHeight: 1.45,
+    padding: 8,
+    borderRadius: 8,
+    background: "rgba(0,0,0,0.2)",
+    border: "1px solid var(--border)",
+  },
+  podcastActions: { display: "flex", flexWrap: "wrap", gap: 8 },
+  miniBtn: {
+    padding: "6px 10px",
+    borderRadius: 8,
+    border: "none",
+    background: "var(--accent)",
+    color: "#0b1220",
+    fontWeight: 700,
+    fontSize: "0.78rem",
+    cursor: "pointer",
+  },
+  miniBtnGhost: {
+    padding: "6px 10px",
+    borderRadius: 8,
+    border: "1px solid var(--border)",
+    background: "transparent",
+    color: "var(--text)",
+    fontSize: "0.78rem",
+    cursor: "pointer",
+  },
+  podcastHint: { margin: 0, fontSize: "0.68rem", color: "var(--muted)", lineHeight: 1.4 },
   quickBtn: {
     padding: "10px 12px",
     borderRadius: 10,
