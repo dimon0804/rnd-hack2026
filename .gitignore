@@ -12,6 +12,7 @@ node_modules/
 .DS_Store
 *.log
 .idea/
-.vscode/
+.vscode/*
+!.vscode/settings.json
 coverage.xml
 htmlcov/

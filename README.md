@@ -32,7 +32,8 @@ docker compose up -d --build
 
 - API Gateway: `http://localhost:8000` (напрямую) или через Nginx: `http://localhost`
 - document-service (напрямую): `http://localhost:8002` · rag-service: `http://localhost:8003` · ai-service: `http://localhost:8004`
-- Frontend (dev): `cd frontend && npm install && npm run dev` → `http://localhost:3000`
+- **Frontend без локального Node:** `docker compose --profile dev up -d --build` → UI на `http://localhost:3000` (прокси на `api-gateway` внутри сети Docker).
+- **Frontend с локальным npm:** установите [Node.js LTS](https://nodejs.org/) или `winget install OpenJS.NodeJS.LTS`. В PowerShell: **`. .\tools\use-node-path.ps1`** (dot-source — иначе `node` не попадёт в PATH для postinstall-скриптов), затем `cd frontend && npm ci && npm run dev`. Новые терминалы в Cursor/VS Code подхватывают [`.vscode/settings.json`](.vscode/settings.json).
 - Adminer: `http://localhost:8080` (сервер `postgres`, пользователь/БД из `.env`)
 
 ## Ветки Git
