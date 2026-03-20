@@ -1,13 +1,24 @@
 import { aiChat } from "../api/ai";
 import { ragQuery } from "../api/rag";
 
-const MAX_CTX = 10000;
+const MAX_CTX = 12000;
 
 type AuthFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
 async function contextFromDocument(documentId: string, authFetch: AuthFetch): Promise<string> {
-  const chunks = await ragQuery("основное содержание документа ключевые разделы", authFetch, 8, [documentId]);
-  let text = chunks.map((c) => c.text).join("\n\n");
+  // Два запроса: общий + «плотный» по словам из текста — TF-IDF иногда даёт нули; на бэкенде есть fallback по document_id.
+  const q1 = await ragQuery("основное содержание документа ключевые разделы", authFetch, 16, [documentId]);
+  const seen = new Set(q1.map((c) => c.chunk_id));
+  const q2 = await ragQuery("текст содержание разделы выводы", authFetch, 16, [documentId]);
+  const merged = [...q1];
+  for (const c of q2) {
+    if (!seen.has(c.chunk_id)) {
+      seen.add(c.chunk_id);
+      merged.push(c);
+    }
+  }
+  merged.sort((a, b) => a.chunk_id - b.chunk_id);
+  let text = merged.map((c) => c.text).join("\n\n");
   if (text.length > MAX_CTX) text = text.slice(0, MAX_CTX) + "\n…";
   return text;
 }
@@ -50,6 +61,9 @@ export async function runQuickAction(
   authFetch: AuthFetch,
 ): Promise<string> {
   const ctx = await contextFromDocument(documentId, authFetch);
+  if (!ctx.trim()) {
+    return "Текст документа не найден в индексе RAG. Перезагрузите файл или дождитесь статуса «Готово» и обновите страницу.";
+  }
   const prompts: Record<typeof kind, { system: string; user: string }> = {
     simple: {
       system: "Объясняй простым языком, как для старшеклассника. Только русский.",
