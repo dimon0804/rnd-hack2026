@@ -2,4 +2,4 @@
 
 Микросервисы платформы. Каждый сервис — отдельная папка со своим `Dockerfile` (по мере появления).
 
-В compose: **api-gateway** и **auth-service** (PostgreSQL). Остальные сервисы — заготовки под следующие этапы.
+В compose: **api-gateway**, **auth-service**, **document-service**, **rag-service** (PostgreSQL, Redis, общий volume для загрузок). Остальные сервисы — по мере готовности.

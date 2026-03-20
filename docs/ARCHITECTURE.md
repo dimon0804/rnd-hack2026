@@ -21,7 +21,7 @@ flowchart LR
   GW -.->|/api/v1/generate/*| Gen
 ```
 
-Реализованы **Nginx**, **api-gateway** и **auth-service** (прокси с gateway на `/api/v1/auth/*`). Остальные сервисы подключаются по мере готовности.
+Реализованы **Nginx**, **api-gateway**, **auth-service** (прокси `/api/v1/auth/*`), **document-service** (`/api/v1/documents/*`) и заглушка **rag-service** (`/api/v1/rag/*` для внутренних вызовов). После загрузки файла document-service вызывает `rag-service` для постановки в pipeline индексации (общий volume с файлами).
 
 ## Данные
 

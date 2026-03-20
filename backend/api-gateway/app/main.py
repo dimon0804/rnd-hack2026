@@ -10,6 +10,7 @@ from slowapi.util import get_remote_address
 
 from app.api.health import router as health_router
 from app.api.proxy_auth import router as proxy_auth_router
+from app.api.proxy_documents import router as proxy_documents_router
 from app.core.config import settings
 
 limiter = Limiter(key_func=get_remote_address)
@@ -17,7 +18,7 @@ limiter = Limiter(key_func=get_remote_address)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    async with httpx.AsyncClient(timeout=300.0) as client:
         app.state.http_client = client
         yield
 
@@ -51,6 +52,7 @@ def create_app() -> FastAPI:
 
     app.include_router(health_router)
     app.include_router(proxy_auth_router)
+    app.include_router(proxy_documents_router)
 
     @app.get("/")
     @limiter.limit(f"{settings.rate_limit_per_minute}/minute")

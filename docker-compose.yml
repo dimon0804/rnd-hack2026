@@ -64,6 +64,47 @@ services:
       postgres:
         condition: service_healthy
 
+  rag-service:
+    build:
+      context: ./backend/rag-service
+      dockerfile: Dockerfile
+    container_name: ai-platform-rag-service
+    restart: unless-stopped
+    ports:
+      - "8003:8003"
+    volumes:
+      - document_uploads:/data/uploads
+    environment:
+      UPLOAD_DIR: /data/uploads
+
+  document-service:
+    build:
+      context: ./backend/document-service
+      dockerfile: Dockerfile
+    container_name: ai-platform-document-service
+    restart: unless-stopped
+    ports:
+      - "8002:8002"
+    volumes:
+      - document_uploads:/data/uploads
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_USER: ${POSTGRES_USER:-app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-ai_platform}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-dev-jwt-secret-change-in-production-min-32-chars}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+      RAG_SERVICE_URL: ${RAG_SERVICE_URL:-http://rag-service:8003}
+      UPLOAD_DIR: /data/uploads
+      ALLOW_ANONYMOUS_UPLOAD: ${ALLOW_ANONYMOUS_UPLOAD:-true}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      auth-service:
+        condition: service_started
+      rag-service:
+        condition: service_started
+
   api-gateway:
     build:
       context: ./backend/api-gateway
@@ -76,12 +117,15 @@ services:
       RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-120}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       AUTH_SERVICE_URL: ${AUTH_SERVICE_URL:-http://auth-service:8001}
+      DOCUMENT_SERVICE_URL: ${DOCUMENT_SERVICE_URL:-http://document-service:8002}
     ports:
       - "8000:8000"
     depends_on:
       redis:
         condition: service_healthy
       auth-service:
+        condition: service_started
+      document-service:
         condition: service_started
 
   nginx:
@@ -98,3 +142,4 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  document_uploads:

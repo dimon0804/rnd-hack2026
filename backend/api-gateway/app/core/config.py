@@ -28,6 +28,11 @@ class Settings(BaseSettings):
         alias="AUTH_SERVICE_URL",
     )
 
+    document_service_url: str = Field(
+        default="http://document-service:8002",
+        alias="DOCUMENT_SERVICE_URL",
+    )
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def strip_origins(cls, v: str | list[str]) -> str | list[str]:
