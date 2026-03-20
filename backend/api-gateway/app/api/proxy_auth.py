@@ -18,7 +18,7 @@ _HOP_BY_HOP = {
 }
 
 
-def _filter_request_headers(request: Request) -> dict[str, str]:
+def filter_request_headers(request: Request) -> dict[str, str]:
     return {
         k: v
         for k, v in request.headers.items()
@@ -26,7 +26,7 @@ def _filter_request_headers(request: Request) -> dict[str, str]:
     }
 
 
-def _filter_response_headers(resp: httpx.Response) -> dict[str, str]:
+def filter_response_headers(resp: httpx.Response) -> dict[str, str]:
     return {
         k: v
         for k, v in resp.headers.items()
@@ -50,12 +50,12 @@ async def proxy_auth(request: Request, path: str) -> Response:
     resp = await client.request(
         request.method,
         url,
-        headers=_filter_request_headers(request),
+        headers=filter_request_headers(request),
         content=body,
     )
 
     return Response(
         content=resp.content,
         status_code=resp.status_code,
-        headers=_filter_response_headers(resp),
+        headers=filter_response_headers(resp),
     )

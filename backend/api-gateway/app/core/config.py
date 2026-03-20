@@ -27,6 +27,14 @@ class Settings(BaseSettings):
         default="http://auth-service:8001",
         alias="AUTH_SERVICE_URL",
     )
+    rag_service_url: str = Field(
+        default="http://rag-service:8003",
+        alias="RAG_SERVICE_URL",
+    )
+    ai_service_url: str = Field(
+        default="http://ai-service:8004",
+        alias="AI_SERVICE_URL",
+    )
 
     document_service_url: str = Field(
         default="http://document-service:8002",

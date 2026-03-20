@@ -105,6 +105,19 @@ services:
       rag-service:
         condition: service_started
 
+  ai-service:
+    build:
+      context: ./backend/ai-service
+      dockerfile: Dockerfile
+    container_name: ai-platform-ai-service
+    restart: unless-stopped
+    ports:
+      - "8004:8004"
+    environment:
+      MISTRAL_API_KEY: ${MISTRAL_API_KEY:-}
+      MISTRAL_BASE_URL: ${MISTRAL_BASE_URL:-https://api.mistral.ai}
+      MISTRAL_CHAT_MODEL: ${MISTRAL_CHAT_MODEL:-mistral-small-latest}
+
   api-gateway:
     build:
       context: ./backend/api-gateway
@@ -118,6 +131,8 @@ services:
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       AUTH_SERVICE_URL: ${AUTH_SERVICE_URL:-http://auth-service:8001}
       DOCUMENT_SERVICE_URL: ${DOCUMENT_SERVICE_URL:-http://document-service:8002}
+      RAG_SERVICE_URL: ${RAG_SERVICE_URL:-http://rag-service:8003}
+      AI_SERVICE_URL: ${AI_SERVICE_URL:-http://ai-service:8004}
     ports:
       - "8000:8000"
     depends_on:
@@ -126,6 +141,10 @@ services:
       auth-service:
         condition: service_started
       document-service:
+        condition: service_started
+      rag-service:
+        condition: service_started
+      ai-service:
         condition: service_started
 
   nginx:

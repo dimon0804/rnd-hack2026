@@ -17,7 +17,7 @@ docker/
   nginx/            # reverse proxy
 ```
 
-Инфраструктура поднимается через `docker-compose`: PostgreSQL, Redis, Adminer, Nginx, **api-gateway**, **auth-service**, **document-service**, **rag-service** (общий volume для загрузок).
+Инфраструктура поднимается через `docker-compose`: PostgreSQL, Redis, Adminer, Nginx, **api-gateway**, **auth-service**, **document-service**, **rag-service**, **ai-service** (общий volume для загрузок).
 
 Распределение ролей: [`docs/TEAM.md`](docs/TEAM.md). Git-процесс: [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
@@ -25,13 +25,13 @@ docker/
 
 ```bash
 cp .env.example .env
-# задайте SECRET_KEY и при необходимости пароли БД
+# задайте SECRET_KEY, JWT_SECRET_KEY, при необходимости MISTRAL_API_KEY
 
 docker compose up -d --build
 ```
 
 - API Gateway: `http://localhost:8000` (напрямую) или через Nginx: `http://localhost`
-- document-service (напрямую): `http://localhost:8002` · rag-service: `http://localhost:8003`
+- document-service (напрямую): `http://localhost:8002` · rag-service: `http://localhost:8003` · ai-service: `http://localhost:8004`
 - Frontend (dev): `cd frontend && npm install && npm run dev` → `http://localhost:3000`
 - Adminer: `http://localhost:8080` (сервер `postgres`, пользователь/БД из `.env`)
 
@@ -55,14 +55,15 @@ docker compose up -d --build
 
 ## Текущий этап
 
-- **api-gateway:** health, CORS, rate limit, прокси на `/api/v1/auth/*` и `/api/v1/documents/*`
-- **auth-service:** PostgreSQL, bcrypt, JWT access + refresh в БД, register / login / refresh / logout
-- **document-service:** загрузка PDF/DOCX/TXT, метаданные в БД, вызов **rag-service** после сохранения
-- **rag-service:** stub `POST /api/v1/rag/ingest` (202), общий volume с файлами
+- **api-gateway:** прокси на `/api/v1/auth/*`, `/api/v1/documents/*`, `/api/v1/rag/*`, `/api/v1/ai/*`
+- **auth-service:** JWT, register / login / refresh / logout
+- **document-service:** загрузка PDF/DOCX/TXT, метаданные в БД, вызов **rag** `ingest` после сохранения
+- **rag-service:** `ingest` (stub) + TF-IDF `index` / `query` (in-memory)
+- **ai-service:** Mistral `POST /api/v1/ai/chat`
 - **frontend:** страница загрузки (Vite + React)
 
 Проверка auth: `POST http://localhost:8000/api/v1/auth/register` с JSON `{"email":"a@b.c","password":"password12"}`.
 
-Загрузка через gateway: `POST http://localhost:8000/api/v1/documents/upload` (`multipart/form-data`, поле `file`). Для dev можно включить `ALLOW_ANONYMOUS_UPLOAD=true` (по умолчанию в compose).
+Загрузка через gateway: `POST http://localhost:8000/api/v1/documents/upload` (`multipart/form-data`, поле `file`). Для dev можно `ALLOW_ANONYMOUS_UPLOAD=true` в compose.
 
-Следующий шаг: полноценный RAG (эмбеддинги, векторное хранилище), чат и generation-service — по бэклогу команды.
+Следующий шаг: читать текст из файла после upload и дергать `/api/v1/rag/index`, generation-service, чат с RAG.
