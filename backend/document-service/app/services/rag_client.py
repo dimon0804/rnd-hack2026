@@ -41,6 +41,25 @@ async def notify_ingest(
     return IngestOutcome(success=ok, chunks_indexed=chunks, detail=detail or ("Проиндексировано" if ok else "Ошибка индексации"))
 
 
+def _rag_connection_hint(url: str, err: str) -> str:
+    """Понятное сообщение при DNS/сетевых ошибках до rag-service."""
+    low = err.lower()
+    if (
+        "errno -5" in low
+        or "no address associated" in low
+        or "name or service not known" in low
+        or "getaddrinfo failed" in low
+    ):
+        return (
+            f"{err[:700]}\n\n"
+            f"Не удалось открыть RAG по адресу: {url}\n"
+            "• В Docker Compose задайте RAG_SERVICE_URL=http://rag-service:8003 или удалите переменную из .env.\n"
+            "• Не используйте localhost внутри контейнера — это сам контейнер, не хост.\n"
+            "• Если document-service запущен на машине без Docker-сети — укажите http://127.0.0.1:8003 (порт rag-service)."
+        )
+    return err[:1000]
+
+
 async def notify_ingest_safe(
     client: httpx.AsyncClient,
     document_id: uuid.UUID,
@@ -52,4 +71,6 @@ async def notify_ingest_safe(
         return await notify_ingest(client, document_id, storage_path, mime_type, user_id)
     except Exception as exc:  # noqa: BLE001
         logger.warning("RAG ingest failed: %s", exc)
-        return IngestOutcome(success=False, chunks_indexed=0, detail=str(exc)[:1000])
+        url = f"{settings.rag_service_url.rstrip('/')}/api/v1/rag/ingest"
+        detail = _rag_connection_hint(url, str(exc))
+        return IngestOutcome(success=False, chunks_indexed=0, detail=detail[:2000])
