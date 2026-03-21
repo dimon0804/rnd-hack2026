@@ -17,13 +17,24 @@ const IMG_X = 5.1;
 const IMG_W = 4.75;
 const TEXT_W = 4.45;
 
+/** Скачивание Blob. Если расширение не указано — подставляется .pptx (исторически для презентаций). */
 export function triggerBlobDownload(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = filename.toLowerCase().endsWith(".pptx") ? filename : `${filename}.pptx`;
+  const lower = filename.toLowerCase();
+  const hasKnownExt =
+    lower.endsWith(".pptx") ||
+    lower.endsWith(".zip") ||
+    lower.endsWith(".csv") ||
+    lower.endsWith(".json") ||
+    lower.endsWith(".txt");
+  a.download = hasKnownExt ? filename : `${filename}.pptx`;
+  a.style.display = "none";
+  document.body.appendChild(a);
   a.click();
-  URL.revokeObjectURL(url);
+  document.body.removeChild(a);
+  window.setTimeout(() => URL.revokeObjectURL(url), 1500);
 }
 
 function addAccentBar(pptx: InstanceType<typeof pptxgen>, slide: ReturnType<InstanceType<typeof pptxgen>["addSlide"]>) {
