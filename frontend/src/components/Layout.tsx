@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import { AppHeader } from "./AppHeader";
 import { CookieConsent } from "./CookieConsent";
+import { LiveSystemPanel } from "./LiveSystemPanel";
 import { GlassDropletsForeground, GlassDropletsLayer } from "./GlassDroplets";
 
 export function Layout() {
@@ -23,6 +24,7 @@ export function Layout() {
         <Outlet />
       </div>
       <GlassDropletsForeground />
+      <LiveSystemPanel />
       <footer className="site-footer">
         <div className="footer-inner">
           <span>

@@ -17,8 +17,10 @@ if [ ! -f "$LOCK_FILE" ]; then
 fi
 
 HASH="$(sha256sum "$LOCK_FILE" | awk '{print $1}')"
+# POSIX sh: нельзя ${HASH:0:12} (это bash) — иначе dash: «Bad substitution».
+HASH_SHORT="$(printf '%s' "$HASH" | cut -c1-12)"
 if [ ! -f "$SYNC_FILE" ] || [ "$(cat "$SYNC_FILE" 2>/dev/null)" != "$HASH" ]; then
-  echo "frontend: синхронизация node_modules (npm ci), lock ${HASH:0:12}…"
+  echo "frontend: синхронизация node_modules (npm ci), lock ${HASH_SHORT}…"
   npm ci --no-audit --no-fund --loglevel=info
   echo "$HASH" > "$SYNC_FILE"
   echo "frontend: node_modules синхронизированы."

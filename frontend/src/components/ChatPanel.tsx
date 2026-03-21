@@ -5,6 +5,7 @@ import { listDocuments } from "../api/documents";
 import type { RagChunk } from "../api/rag";
 import { ragQuery } from "../api/rag";
 import { humanizeChatError } from "../lib/apiError";
+import { hydrateChunkTextsFromDocuments } from "../lib/ragChunkHydrate";
 import { useAuth } from "../context/AuthContext";
 import { SttChatToolbar } from "./SttChatToolbar";
 
@@ -89,7 +90,8 @@ export function ChatPanel() {
         return;
       }
 
-      const chunks = await ragQuery(text, authFetch, 6, indexedIds);
+      let chunks = await ragQuery(text, authFetch, 6, indexedIds);
+      chunks = await hydrateChunkTextsFromDocuments(chunks, authFetch);
       setLastChunks(chunks);
       const systemPrompt = buildSystemPrompt(chunks);
       const reply = await aiChat(text, systemPrompt, authFetch, { maxTokens: 1200 });
