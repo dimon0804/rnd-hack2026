@@ -22,6 +22,7 @@ import {
 import { layoutMindmap, parseMindmapText, type MindLayoutNode } from "../../lib/mindmapParse";
 import { prefetchVoices, speakPodcastScript, stopSpeaking } from "../../lib/speech";
 import { humanizeChatError } from "../../lib/apiError";
+import { PROMPT_TEMPLATES, type PromptTemplateId } from "../../lib/promptTemplates";
 import { parseGammaDeckJson } from "../../lib/gammaDeck";
 import { buildGammaPptxBlob, triggerBlobDownload } from "../../lib/gammaDeckPptx";
 import { useAuth } from "../../context/AuthContext";
@@ -168,6 +169,31 @@ export function DocumentWorkspace({ document }: Props) {
           : "этому документу";
       const system = `Помощник по материалам пользователя (${scope}). Отвечай на русском только по приведённому контексту. Если в контексте нет ответа — скажи об этом. Пиши обычным текстом, без markdown (#, **, обратные кавычки).\n\nКонтекст:\n${ctx || "(пусто)"}`;
       const reply = await aiChat(text, system, authFetch, { maxTokens: 1200 });
+      setMessages((m) => [...m, { role: "assistant", content: reply.content, sourceChunks: sourceChunksForUi }]);
+    } catch (e) {
+      const raw = e instanceof Error ? e.message : "Ошибка";
+      setMessages((m) => [...m, { role: "assistant", content: humanizeChatError(raw) }]);
+    } finally {
+      setChatBusy(false);
+    }
+  };
+
+  const runPromptTemplate = async (id: PromptTemplateId) => {
+    if (!ready || chatBusy || sttBusy) return;
+    const t = PROMPT_TEMPLATES[id];
+    setTab("chat");
+    setMessages((m) => [...m, { role: "user", content: t.label }]);
+    setChatBusy(true);
+    try {
+      const chunks = await ragQuery(t.ragQuery, authFetch, 6, ragIds);
+      const ctx = chunks.map((c) => c.text).join("\n\n").slice(0, 12000);
+      const sourceChunksForUi = chunks.length > 0 ? [chunks[0]] : [];
+      const scope =
+        ragIds.length > 1
+          ? "загруженным связанным документам (одна тема)"
+          : "этому документу";
+      const system = `Помощник по материалам пользователя (${scope}). Отвечай на русском только по приведённому контексту. Если в контексте нет ответа — скажи об этом. Пиши обычным текстом, без markdown (#, **, обратные кавычки).\n\nКонтекст:\n${ctx || "(пусто)"}`;
+      const reply = await aiChat(t.llmInstruction, system, authFetch, { maxTokens: 1400 });
       setMessages((m) => [...m, { role: "assistant", content: reply.content, sourceChunks: sourceChunksForUi }]);
     } catch (e) {
       const raw = e instanceof Error ? e.message : "Ошибка";
@@ -624,6 +650,20 @@ export function DocumentWorkspace({ document }: Props) {
                 <code style={styles.codeSm}>STT_BASE_URL</code>, для
                 хакатона часто порт <strong>6640</strong>).
               </p>
+              <div className="chat-templates" role="group" aria-label="Шаблоны ответа по RAG">
+                <span className="chat-templates__kicker">Шаблоны</span>
+                {(["investor", "student", "slide"] as const).map((tid) => (
+                  <button
+                    key={tid}
+                    type="button"
+                    className="btn-outline chat-templates__btn"
+                    disabled={!ready || chatBusy || sttBusy}
+                    onClick={() => void runPromptTemplate(tid)}
+                  >
+                    {PROMPT_TEMPLATES[tid].label}
+                  </button>
+                ))}
+              </div>
               <div className="chat-scroll">
                 <div className="chat-thread">
                   {messages.map((msg, i) => (

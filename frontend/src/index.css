@@ -2475,6 +2475,40 @@ main:focus-visible {
   line-height: 1.45;
 }
 
+.chat-templates {
+  flex-shrink: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem 0.55rem;
+  padding: 0 1.2rem 0.75rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
+}
+
+.chat-templates__kicker {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  width: 100%;
+  margin-bottom: 0.1rem;
+}
+
+@media (min-width: 520px) {
+  .chat-templates__kicker {
+    width: auto;
+    margin-bottom: 0;
+    margin-right: 0.35rem;
+  }
+}
+
+.chat-templates__btn {
+  font-size: 0.78rem !important;
+  padding: 0.4rem 0.7rem !important;
+  border-radius: 8px;
+}
+
 .tab-panel--chat .chat-scroll {
   flex: 1 1 auto;
   min-height: 0;
