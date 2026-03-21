@@ -24,7 +24,9 @@ import { prefetchVoices, speakPodcastScript, stopSpeaking } from "../../lib/spee
 import { humanizeChatError } from "../../lib/apiError";
 import { PROMPT_TEMPLATES, type PromptTemplateId } from "../../lib/promptTemplates";
 import { parseGammaDeckJson } from "../../lib/gammaDeck";
+import { buildDocumentPackageZip } from "../../lib/documentPackageZip";
 import { buildGammaPptxBlob, triggerBlobDownload } from "../../lib/gammaDeckPptx";
+import { formatVideoScriptText } from "../../lib/videoRecapPlan";
 import { useAuth } from "../../context/AuthContext";
 import { fetchStockImageByQuery } from "../../lib/videoRecapMedia";
 import { InfographicChart } from "./InfographicChart";
@@ -97,6 +99,7 @@ export function DocumentWorkspace({ document }: Props) {
   const [infographic, setInfographic] = useState<InfographicSpec | null>(null);
   const [infographicLoading, setInfographicLoading] = useState(false);
   const [infographicErr, setInfographicErr] = useState<string | null>(null);
+  const [packageLoading, setPackageLoading] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const st = document.status.trim().toLowerCase();
@@ -355,7 +358,7 @@ export function DocumentWorkspace({ document }: Props) {
 
   const downloadVideoScript = () => {
     if (!videoPlan) return;
-    const text = buildVideoScriptText(videoPlan);
+    const text = formatVideoScriptText(videoPlan);
     const base = document.original_filename.replace(/\.[^.]+$/, "") || "document";
     const blob = new Blob([`\ufeff${text}`], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -414,6 +417,32 @@ export function DocumentWorkspace({ document }: Props) {
       setTab("flashcards");
     } finally {
       setCardsLoading(false);
+    }
+  };
+
+  const onDownloadDocumentPackage = async () => {
+    if (!ready || packageLoading) return;
+    setPackageLoading(true);
+    try {
+      const base = document.original_filename.replace(/\.[^.]+$/, "") || "document";
+      const blob = await buildDocumentPackageZip({
+        baseName: document.original_filename,
+        ragIds,
+        authFetch,
+        workspaceUrl: typeof window !== "undefined" ? window.location.href : "",
+        summary: summary ?? undefined,
+        videoPlan: videoPlan ?? undefined,
+        podcastScript: podcastScript ?? undefined,
+        infographic: infographic ?? undefined,
+        tableCsv: tableCsv && tableCsv.trim() ? tableCsv : undefined,
+        presentationBlob: presentationBlob ?? undefined,
+      });
+      triggerBlobDownload(blob, `${base}-paket.zip`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Ошибка";
+      window.alert(humanizeChatError(msg));
+    } finally {
+      setPackageLoading(false);
     }
   };
 
@@ -1068,6 +1097,14 @@ export function DocumentWorkspace({ document }: Props) {
             >
               Mindmap (граф)
             </button>
+            <button
+              type="button"
+              style={styles.quickBtn}
+              disabled={!ready || packageLoading}
+              onClick={() => void onDownloadDocumentPackage()}
+            >
+              {packageLoading ? "Архив…" : "Пакет документа (ZIP)"}
+            </button>
           </div>
         </aside>
       </div>
@@ -1111,27 +1148,6 @@ function ChatSourceCitations({ chunks }: { chunks: RagChunk[] }) {
       </ul>
     </div>
   );
-}
-
-function buildVideoScriptText(plan: VideoRecapPlan): string {
-  const lines: string[] = [];
-  lines.push(`# ${plan.video_title}`);
-  lines.push(`Общая длительность (ориентир): ${plan.total_duration_sec} с`);
-  if (plan.narrator_note_ru) {
-    lines.push("");
-    lines.push("Заметка диктору:");
-    lines.push(plan.narrator_note_ru);
-  }
-  for (const s of plan.scenes) {
-    lines.push("");
-    lines.push(`--- Сцена ${s.scene_index}: ${s.title_ru} (${s.duration_sec} с) ---`);
-    lines.push("");
-    lines.push("Озвучка:");
-    lines.push(s.voiceover_ru);
-    lines.push("");
-    lines.push(`Кадр (запрос к стоку, EN): ${s.image_hint_en}`);
-  }
-  return lines.join("\n");
 }
 
 function FlashCard({ q, a }: { q: string; a: string }) {

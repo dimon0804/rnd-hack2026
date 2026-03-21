@@ -51,3 +51,25 @@ export function parseVideoRecapJson(raw: string): VideoRecapPlan {
     narrator_note_ru,
   };
 }
+
+/** Текстовый сценарий видео для файла / экспорта. */
+export function formatVideoScriptText(plan: VideoRecapPlan): string {
+  const lines: string[] = [];
+  lines.push(`# ${plan.video_title}`);
+  lines.push(`Общая длительность (ориентир): ${plan.total_duration_sec} с`);
+  if (plan.narrator_note_ru) {
+    lines.push("");
+    lines.push("Заметка диктору:");
+    lines.push(plan.narrator_note_ru);
+  }
+  for (const s of plan.scenes) {
+    lines.push("");
+    lines.push(`--- Сцена ${s.scene_index}: ${s.title_ru} (${s.duration_sec} с) ---`);
+    lines.push("");
+    lines.push("Озвучка:");
+    lines.push(s.voiceover_ru);
+    lines.push("");
+    lines.push(`Кадр (запрос к стоку, EN): ${s.image_hint_en}`);
+  }
+  return lines.join("\n");
+}
