@@ -5,6 +5,22 @@ export type DocumentUploadResult = {
   size_bytes: number;
   status: string;
   message: string;
+  topic_group_id?: string | null;
+};
+
+export type BatchUploadItem = {
+  id: string;
+  original_filename: string;
+  mime_type: string;
+  size_bytes: number;
+  status: string;
+  message: string;
+  topic_group_id?: string | null;
+};
+
+export type BatchUploadResult = {
+  results: BatchUploadItem[];
+  groups_note: string;
 };
 
 function apiBase(): string {
@@ -28,6 +44,26 @@ export async function uploadDocument(
   return res.json() as Promise<DocumentUploadResult>;
 }
 
+/** Несколько файлов: тематическая группировка на бэкенде и общий RAG для совпадающих по теме. */
+export async function uploadDocumentBatch(
+  files: File[],
+  authFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>,
+): Promise<BatchUploadResult> {
+  const form = new FormData();
+  for (const f of files) {
+    form.append("files", f);
+  }
+  const res = await authFetch(`${apiBase()}/api/v1/documents/upload-batch`, {
+    method: "POST",
+    body: form,
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || res.statusText);
+  }
+  return res.json() as Promise<BatchUploadResult>;
+}
+
 export type DocumentItem = {
   id: string;
   original_filename: string;
@@ -36,6 +72,8 @@ export type DocumentItem = {
   status: string;
   status_message: string | null;
   created_at: string;
+  topic_group_id?: string | null;
+  group_document_ids?: string[];
 };
 
 export async function listDocuments(

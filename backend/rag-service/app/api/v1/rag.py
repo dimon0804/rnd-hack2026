@@ -1,8 +1,10 @@
 import logging
+import os
+import tempfile
 from pathlib import Path
 from uuid import UUID
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, File, Form, Request, UploadFile
 from pydantic import BaseModel, Field
 
 from app.core.config import settings
@@ -84,6 +86,35 @@ def ingest(body: IngestRequest, request: Request) -> IngestResponse:
         chunks_indexed=result.chunks_indexed,
         detail=f"Проиндексировано фрагментов: {result.chunks_indexed}",
     )
+
+
+@router.post("/extract-preview")
+async def extract_preview(
+    file: UploadFile = File(...),
+    mime_type: str = Form(...),
+) -> dict:
+    """Фрагмент текста для проверки тематики до финального сохранения (document-service)."""
+    data = await file.read()
+    if not data:
+        return {"preview": "", "chars_total": 0, "detail": "empty"}
+    suffix = Path(file.filename or "file").suffix or ".bin"
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+    path = Path(tmp.name)
+    try:
+        tmp.write(data)
+        tmp.close()
+        text = extract_text_from_file(mime_type, path)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("extract-preview failed: %s", exc)
+        return {"preview": "", "chars_total": 0, "detail": str(exc)[:500]}
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+    text = text.strip()
+    preview = text[:6000]
+    return {"preview": preview, "chars_total": len(text)}
 
 
 @router.post("/index", response_model=IndexDocumentResponse)

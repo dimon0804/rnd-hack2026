@@ -2,7 +2,14 @@ import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "r
 
 const DOCS_PAGE_SIZE = 8;
 import { Link, useNavigate } from "react-router-dom";
-import { listDocuments, uploadDocument, type DocumentItem, type DocumentUploadResult } from "../api/documents";
+import {
+  listDocuments,
+  uploadDocument,
+  uploadDocumentBatch,
+  type BatchUploadResult,
+  type DocumentItem,
+  type DocumentUploadResult,
+} from "../api/documents";
 import { documentStatusRu } from "../lib/documentStatus";
 import { ProcessingOverlay } from "./workspace/ProcessingOverlay";
 import { useAuth } from "../context/AuthContext";
@@ -20,6 +27,7 @@ export function UploadPanel() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<DocumentUploadResult | null>(null);
+  const [batchResult, setBatchResult] = useState<BatchUploadResult | null>(null);
   const [docs, setDocs] = useState<DocumentItem[] | null>(null);
   const [docsPage, setDocsPage] = useState(1);
 
@@ -58,17 +66,28 @@ export function UploadPanel() {
   }, [docs, docsTotalPages]);
 
   const onFiles = async (files: FileList | null) => {
-    const file = files?.[0];
-    if (!file) return;
+    const list = files ? Array.from(files) : [];
+    if (list.length === 0) return;
     setError(null);
     setResult(null);
+    setBatchResult(null);
     setBusy(true);
     try {
-      const res = await uploadDocument(file, authFetch);
-      setResult(res);
-      await refreshList();
-      if (isAuthenticated && res.id) {
-        navigate(`/workspace/${res.id}`, { replace: false });
+      if (list.length === 1) {
+        const res = await uploadDocument(list[0], authFetch);
+        setResult(res);
+        await refreshList();
+        if (isAuthenticated && res.id) {
+          navigate(`/workspace/${res.id}`, { replace: false });
+        }
+      } else {
+        const res = await uploadDocumentBatch(list, authFetch);
+        setBatchResult(res);
+        await refreshList();
+        const first = res.results[0];
+        if (isAuthenticated && first?.id) {
+          navigate(`/workspace/${first.id}`, { replace: false });
+        }
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Ошибка загрузки");
@@ -88,7 +107,8 @@ export function UploadPanel() {
           <p style={styles.kicker}>Рабочий стол</p>
           <h1 style={styles.title}>Загрузка документов</h1>
           <p style={styles.subtitle}>
-            PDF, DOCX, PPTX или TXT до 50&nbsp;MB. Файл сохраняется и ставится в очередь на чанкинг и индексацию в RAG.
+            PDF, DOCX, PPTX или TXT до 50&nbsp;MB каждый. Можно выбрать несколько файлов: схожие по теме объединятся для
+            общего чата (проверка на бэкенде), разные темы — загрузятся отдельно.
           </p>
         </div>
         <ol style={styles.steps}>
@@ -163,6 +183,7 @@ export function UploadPanel() {
           >
             <input
               type="file"
+              multiple
               accept=".pdf,.docx,.pptx,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.presentationml.presentation,text/plain"
               style={styles.file}
               disabled={busy}
@@ -172,8 +193,8 @@ export function UploadPanel() {
               <span style={styles.dropIcon} aria-hidden>
                 ⬆
               </span>
-              <span style={styles.dropTitle}>{busy ? "Загрузка…" : "Перетащите файл сюда"}</span>
-              <span style={styles.dropHint}>или нажмите в эту область, чтобы выбрать с диска</span>
+              <span style={styles.dropTitle}>{busy ? "Загрузка…" : "Перетащите файлы сюда"}</span>
+              <span style={styles.dropHint}>или нажмите — можно выбрать несколько (Ctrl/Shift)</span>
               <span style={styles.formats}>PDF · DOCX · PPTX · TXT</span>
             </div>
           </div>
@@ -198,6 +219,32 @@ export function UploadPanel() {
               {canUseMyDocs && result.status.toLowerCase() === "ready" ? (
                 <div style={styles.okActions}>
                   <Link to={`/workspace/${result.id}`} style={styles.btnChat}>
+                    Открыть рабочую область
+                  </Link>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
+          {batchResult ? (
+            <div style={styles.okCard}>
+              <p style={styles.okMeta}>Загружено файлов: {batchResult.results.length}</p>
+              {batchResult.groups_note ? <p style={styles.okMsg}>{batchResult.groups_note}</p> : null}
+              <ul style={{ margin: "10px 0 0", paddingLeft: 18, fontSize: "0.88rem" }}>
+                {batchResult.results.map((r) => (
+                  <li key={r.id} style={{ marginBottom: 6 }}>
+                    <strong>{r.original_filename}</strong> — {documentStatusRu(r.status)}
+                    {r.topic_group_id ? (
+                      <span style={{ color: "var(--muted)" }}> (группа)</span>
+                    ) : (
+                      <span style={{ color: "var(--muted)" }}> (отдельно)</span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+              {canUseMyDocs && batchResult.results[0]?.status.toLowerCase() === "ready" ? (
+                <div style={styles.okActions}>
+                  <Link to={`/workspace/${batchResult.results[0].id}`} style={styles.btnChat}>
                     Открыть рабочую область
                   </Link>
                 </div>
@@ -233,9 +280,19 @@ export function UploadPanel() {
                   <li key={d.id} style={styles.li}>
                     <Link to={`/workspace/${d.id}`} style={styles.liLink} title={d.original_filename}>
                       <div style={styles.liMain}>
-                        <div style={styles.docName}>{d.original_filename}</div>
+                        <div style={styles.docName}>
+                          {d.topic_group_id && (d.group_document_ids?.length ?? 0) > 1 ? (
+                            <span style={styles.groupMark} title="Один набор тем — чат по всем файлам группы">
+                              🔗{" "}
+                            </span>
+                          ) : null}
+                          {d.original_filename}
+                        </div>
                         <div style={styles.docMeta}>
                           {formatBytes(d.size_bytes)} · {new Date(d.created_at).toLocaleString()}
+                          {d.topic_group_id && (d.group_document_ids?.length ?? 0) > 1 ? (
+                            <span> · группа {d.group_document_ids?.length} файлов</span>
+                          ) : null}
                         </div>
                       </div>
                     </Link>
@@ -560,6 +617,7 @@ const styles: Record<string, CSSProperties> = {
     overflow: "hidden",
   } as CSSProperties,
   docMeta: { color: "var(--muted)", fontSize: "0.82rem", marginTop: 6, lineHeight: 1.4 },
+  groupMark: { color: "var(--accent)", fontSize: "0.85rem" },
   pagination: {
     display: "flex",
     alignItems: "center",

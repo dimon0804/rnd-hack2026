@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import type { DocumentItem } from "../../api/documents";
 import { aiChat } from "../../api/ai";
 import { ragQuery } from "../../api/rag";
@@ -70,11 +70,16 @@ export function DocumentWorkspace({ document }: Props) {
   const failed = st === "failed";
   const processing = !ready && !failed;
 
+  const ragIds = useMemo(
+    () => (document.group_document_ids?.length ? document.group_document_ids : [document.id]),
+    [document.id, document.group_document_ids],
+  );
+
   useEffect(() => {
     if (!ready) return;
     let cancelled = false;
     setLoadingInsights(true);
-    void generateSummaryAndTopics(document.id, authFetch)
+    void generateSummaryAndTopics(ragIds, authFetch)
       .then((r) => {
         if (!cancelled) {
           setSummary(r.summary);
@@ -90,7 +95,7 @@ export function DocumentWorkspace({ document }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [document.id, ready, authFetch]);
+  }, [ragIds, ready, authFetch]);
 
   const sendChat = async () => {
     const text = chatInput.trim();
@@ -99,10 +104,14 @@ export function DocumentWorkspace({ document }: Props) {
     setMessages((m) => [...m, { role: "user", content: text }]);
     setChatBusy(true);
     try {
-      const chunks = await ragQuery(text, authFetch, 6, [document.id]);
+      const chunks = await ragQuery(text, authFetch, 6, ragIds);
       setLastChunks(chunks);
       const ctx = chunks.map((c) => c.text).join("\n\n").slice(0, 12000);
-      const system = `Помощник по одному документу. Отвечай на русском только по приведённому контексту. Если в контексте нет ответа — скажи об этом. Пиши обычным текстом, без markdown (#, **, обратные кавычки).\n\nКонтекст:\n${ctx || "(пусто)"}`;
+      const scope =
+        ragIds.length > 1
+          ? "загруженным связанным документам (одна тема)"
+          : "этому документу";
+      const system = `Помощник по материалам пользователя (${scope}). Отвечай на русском только по приведённому контексту. Если в контексте нет ответа — скажи об этом. Пиши обычным текстом, без markdown (#, **, обратные кавычки).\n\nКонтекст:\n${ctx || "(пусто)"}`;
       const reply = await aiChat(text, system, authFetch, { maxTokens: 1200 });
       setMessages((m) => [...m, { role: "assistant", content: reply.content }]);
     } catch (e) {
@@ -117,7 +126,7 @@ export function DocumentWorkspace({ document }: Props) {
     if (!ready) return;
     setEasyLoading("simple");
     try {
-      const t = await runQuickAction("simple", document.id, authFetch);
+      const t = await runQuickAction("simple", ragIds, authFetch);
       setEasySimple(t);
     } catch (e) {
       setEasySimple(humanizeChatError(e instanceof Error ? e.message : "Ошибка"));
@@ -130,7 +139,7 @@ export function DocumentWorkspace({ document }: Props) {
     if (!ready) return;
     setEasyLoading("short");
     try {
-      const t = await runQuickAction("short", document.id, authFetch);
+      const t = await runQuickAction("short", ragIds, authFetch);
       setEasyShort(t);
     } catch (e) {
       setEasyShort(humanizeChatError(e instanceof Error ? e.message : "Ошибка"));
@@ -143,7 +152,7 @@ export function DocumentWorkspace({ document }: Props) {
     if (!ready) return;
     setReportLoading(true);
     try {
-      const t = await generateOfficialReport(document.id, authFetch);
+      const t = await generateOfficialReport(ragIds, authFetch);
       setReportText(t);
     } catch (e) {
       setReportText(humanizeChatError(e instanceof Error ? e.message : "Ошибка"));
@@ -158,7 +167,7 @@ export function DocumentWorkspace({ document }: Props) {
     setMindmapRoot(null);
     setMindmapRaw(null);
     try {
-      const raw = await generateMindmapText(document.id, authFetch);
+      const raw = await generateMindmapText(ragIds, authFetch);
       setMindmapRaw(raw);
       if (!raw.trim()) {
         setMindmapRoot(null);
@@ -179,7 +188,7 @@ export function DocumentWorkspace({ document }: Props) {
     setPodcastLoading(true);
     setPodcastScript(null);
     try {
-      const t = await runPodcastAction(document.id, authFetch, { tone: podcastTone, pace: podcastPace });
+      const t = await runPodcastAction(ragIds, authFetch, { tone: podcastTone, pace: podcastPace });
       setPodcastScript(t);
     } catch (e) {
       setPodcastScript(humanizeChatError(e instanceof Error ? e.message : "Ошибка"));
@@ -196,7 +205,7 @@ export function DocumentWorkspace({ document }: Props) {
     setTableModel(null);
     try {
       const { csv, model } = await generateStructuredTableCsv(
-        document.id,
+        ragIds,
         authFetch,
         tableFocus.trim() || undefined,
       );
@@ -225,7 +234,7 @@ export function DocumentWorkspace({ document }: Props) {
     if (!ready) return;
     setTestsText(null);
     try {
-      const t = await runQuickAction("test", document.id, authFetch);
+      const t = await runQuickAction("test", ragIds, authFetch);
       setTestsText(t);
       setTab("tests");
     } catch (e) {
@@ -237,7 +246,7 @@ export function DocumentWorkspace({ document }: Props) {
     if (!ready) return;
     setCardsLoading(true);
     try {
-      const f = await generateFlashcards(document.id, authFetch);
+      const f = await generateFlashcards(ragIds, authFetch);
       setCards(f);
       setTab("flashcards");
     } finally {
@@ -265,6 +274,12 @@ export function DocumentWorkspace({ document }: Props) {
         <aside style={styles.left}>
           <p style={styles.sideKicker}>Документ</p>
           <h2 style={styles.docTitle}>{document.original_filename}</h2>
+          {ragIds.length > 1 ? (
+            <p style={styles.groupBanner}>
+              Чат и инструменты учитывают <strong>{ragIds.length} файлов</strong> в одной тематической группе (общий поиск
+              по тексту).
+            </p>
+          ) : null}
           <p style={styles.statusLine}>
             <span style={styles.statusBadge}>{statusLabel}</span>
             {document.status_message ? (
@@ -712,6 +727,12 @@ const styles: Record<string, CSSProperties> = {
   },
   sideKicker: { margin: 0, fontSize: "0.72rem", letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--muted)" },
   docTitle: { margin: "8px 0", fontSize: "1rem", fontWeight: 700, wordBreak: "break-word" },
+  groupBanner: {
+    margin: "0 0 10px",
+    fontSize: "0.82rem",
+    lineHeight: 1.45,
+    color: "var(--muted)",
+  },
   statusLine: { margin: "0 0 16px", fontSize: "0.85rem" },
   statusBadge: {
     display: "inline-block",

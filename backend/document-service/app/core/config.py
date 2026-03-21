@@ -31,6 +31,11 @@ class Settings(BaseSettings):
         alias="RAG_SERVICE_URL",
     )
 
+    ai_service_url: str = Field(
+        default="http://ai-service:8004",
+        alias="AI_SERVICE_URL",
+    )
+
     allow_anonymous_upload: bool = Field(default=False, alias="ALLOW_ANONYMOUS_UPLOAD")
 
     @property

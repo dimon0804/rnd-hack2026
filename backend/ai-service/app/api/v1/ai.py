@@ -1,8 +1,18 @@
+import json
+import re
 import httpx
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from app.core.config import settings
-from app.schemas.ai import ChatRequest, ChatResponse, ExtractTableRequest, ExtractTableResponse, TranscribeResponse
+from app.schemas.ai import (
+    ChatRequest,
+    ChatResponse,
+    ExtractTableRequest,
+    ExtractTableResponse,
+    TopicGroupsRequest,
+    TopicGroupsResponse,
+    TranscribeResponse,
+)
 from app.services.mistral_client import MistralClient
 
 router = APIRouter()
@@ -20,6 +30,81 @@ def _strip_markdown_fences(raw: str) -> str:
     while lines and lines[-1].strip().startswith("```"):
         lines = lines[:-1]
     return "\n".join(lines).strip()
+
+
+def _fallback_topic_groups(n: int) -> list[list[int]]:
+    return [[i] for i in range(n)]
+
+
+def _validate_topic_groups(groups: list[list[int]], n: int) -> bool:
+    flat = [i for g in groups for i in g]
+    if len(flat) != n:
+        return False
+    return sorted(flat) == list(range(n))
+
+
+def _parse_topic_groups_json(raw: str) -> list[list[int]] | None:
+    t = raw.strip()
+    if t.startswith("```"):
+        lines = t.split("\n")
+        t = "\n".join(lines[1:])
+        if "```" in t:
+            t = t.rsplit("```", 1)[0]
+    m = re.search(r"\{[\s\S]*\}", t)
+    if not m:
+        return None
+    try:
+        data = json.loads(m.group(0))
+    except ValueError:
+        return None
+    g = data.get("groups")
+    if not isinstance(g, list):
+        return None
+    out: list[list[int]] = []
+    for item in g:
+        if not isinstance(item, list):
+            return None
+        row: list[int] = []
+        for x in item:
+            if isinstance(x, bool):
+                return None
+            if isinstance(x, int):
+                row.append(x)
+            elif isinstance(x, float) and float(int(x)) == x:
+                row.append(int(x))
+            else:
+                return None
+        out.append(row)
+    return out
+
+
+@router.post("/topic-groups", response_model=TopicGroupsResponse)
+async def partition_topic_groups(body: TopicGroupsRequest) -> TopicGroupsResponse:
+    """Разбиение индексов файлов по тематике (для пакетной загрузки в document-service)."""
+    n = len(body.items)
+    parts: list[str] = []
+    for i, it in enumerate(body.items):
+        parts.append(f"--- Файл index={i}, name={it.filename} ---\n{it.preview[:3500]}\n")
+    user_text = "\n".join(parts)
+    system = """Ты классификатор тематики документов. Даны фрагменты текста из нескольких файлов.
+Разбей индексы файлов 0..N-1 на группы так, чтобы в одной группе были только файлы об ОДНОЙ предметной области
+(одна тема, один проект, одна учебная дисциплина, один продукт, один предмет договора).
+Если файлы явно про разные темы — не смешивай их.
+Ответь ТОЛЬКО JSON без markdown: {"groups":[[0,1],[2]]} — groups это список групп, внутри каждой — индексы файлов. Каждый индекс от 0 до N-1 встречается ровно один раз."""
+    req = ChatRequest(
+        prompt=user_text,
+        system_prompt=system,
+        temperature=0.12,
+        max_tokens=900,
+    )
+    try:
+        res = await client.chat(req)
+        parsed = _parse_topic_groups_json(res.content)
+    except Exception:  # noqa: BLE001
+        return TopicGroupsResponse(groups=_fallback_topic_groups(n))
+    if parsed is None or not _validate_topic_groups(parsed, n):
+        return TopicGroupsResponse(groups=_fallback_topic_groups(n))
+    return TopicGroupsResponse(groups=parsed)
 
 
 @router.post("/extract-table", response_model=ExtractTableResponse)

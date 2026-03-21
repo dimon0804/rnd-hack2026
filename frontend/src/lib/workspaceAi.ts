@@ -39,12 +39,28 @@ async function fetchMergedChunks(documentId: string, authFetch: AuthFetch): Prom
   return merged;
 }
 
-async function contextFromDocument(documentId: string, authFetch: AuthFetch): Promise<string> {
-  let merged = await fetchMergedChunks(documentId, authFetch);
+async function contextFromDocuments(documentIds: string[], authFetch: AuthFetch): Promise<string> {
+  if (documentIds.length === 0) return "";
+  const merged: RagChunk[] = [];
+  for (const id of documentIds) {
+    merged.push(...(await fetchMergedChunks(id, authFetch)));
+  }
+  merged.sort((a, b) => {
+    const dc = a.document_id.localeCompare(b.document_id);
+    if (dc !== 0) return dc;
+    return a.chunk_id - b.chunk_id;
+  });
   if (merged.length === 0) {
     try {
-      await reindexDocument(documentId, authFetch);
-      merged = await fetchMergedChunks(documentId, authFetch);
+      await reindexDocument(documentIds[0], authFetch);
+      for (const id of documentIds) {
+        merged.push(...(await fetchMergedChunks(id, authFetch)));
+      }
+      merged.sort((a, b) => {
+        const dc = a.document_id.localeCompare(b.document_id);
+        if (dc !== 0) return dc;
+        return a.chunk_id - b.chunk_id;
+      });
     } catch {
       /* reindex недоступен или нет прав — оставляем пустой контекст */
     }
@@ -55,23 +71,24 @@ async function contextFromDocument(documentId: string, authFetch: AuthFetch): Pr
 }
 
 /** Авто после открытия workspace: краткое содержание + темы. */
-export async function generateSummaryAndTopics(documentId: string, authFetch: AuthFetch): Promise<{
+export async function generateSummaryAndTopics(documentIds: string[], authFetch: AuthFetch): Promise<{
   summary: string;
   topics: string[];
 }> {
-  const ctx = await contextFromDocument(documentId, authFetch);
+  const ctx = await contextFromDocuments(documentIds, authFetch);
   if (!ctx.trim()) {
     return {
       summary:
-        "Недостаточно текста в индексе для этого документа (повторная индексация не помогла или файл недоступен).",
+        "Недостаточно текста в индексе для этих документов (повторная индексация не помогла или файлы недоступны).",
       topics: [],
     };
   }
+  const multi = documentIds.length > 1;
   const system = `Ты аналитик текстов. Отвечай только на русском. ${PLAIN_TEXT_RULE}
 Формат ответа строго такой:
-КРАТКО: (2–4 предложения суть документа)
+КРАТКО: (2–4 предложения суть ${multi ? "материалов" : "документа"})
 ТЕМЫ: (каждая тема с новой строки, начинай строку с «- »)`;
-  const prompt = `Вот фрагменты из документа:\n\n${ctx}\n\nСделай КРАТКО и ТЕМЫ по инструкции.`;
+  const prompt = `Вот фрагменты из ${multi ? "нескольких связанных документов" : "документа"}:\n\n${ctx}\n\nСделай КРАТКО и ТЕМЫ по инструкции.`;
   const res = await aiChat(prompt, system, authFetch, { maxTokens: 900, temperature: 0.2 });
   const content = res.content;
   const krIdx = content.indexOf("КРАТКО:");
@@ -99,11 +116,11 @@ export type PodcastPace = "slow" | "normal" | "fast";
 
 /** Аудиопересказ: сценарий двух ведущих; тон и темп задают стиль и длину реплик. */
 export async function runPodcastAction(
-  documentId: string,
+  documentIds: string[],
   authFetch: AuthFetch,
   opts: { tone: PodcastTone; pace: PodcastPace },
 ): Promise<string> {
-  const ctx = await contextFromDocument(documentId, authFetch);
+  const ctx = await contextFromDocuments(documentIds, authFetch);
   if (!ctx.trim()) {
     return "Текст документа не найден в индексе RAG после повторной индексации. Проверьте статус документа или загрузите файл снова.";
   }
@@ -130,8 +147,8 @@ ${PLAIN_TEXT_RULE}
 }
 
 /** Официальная справка / резюме по шаблону (деловой стиль). */
-export async function generateOfficialReport(documentId: string, authFetch: AuthFetch): Promise<string> {
-  const ctx = await contextFromDocument(documentId, authFetch);
+export async function generateOfficialReport(documentIds: string[], authFetch: AuthFetch): Promise<string> {
+  const ctx = await contextFromDocuments(documentIds, authFetch);
   if (!ctx.trim()) {
     return "Нет текста в индексе для формирования отчёта. Проверьте статус документа.";
   }
@@ -166,8 +183,8 @@ ${PLAIN_TEXT_RULE}
 }
 
 /** Текст иерархии с отступами для парсинга в mindmap-граф. */
-export async function generateMindmapText(documentId: string, authFetch: AuthFetch): Promise<string> {
-  const ctx = await contextFromDocument(documentId, authFetch);
+export async function generateMindmapText(documentIds: string[], authFetch: AuthFetch): Promise<string> {
+  const ctx = await contextFromDocuments(documentIds, authFetch);
   if (!ctx.trim()) return "";
   const system = `Построй иерархию ключевых понятий для интеллект-карты. Только русский. ${PLAIN_TEXT_RULE}
 Формат:
@@ -185,10 +202,10 @@ export async function generateMindmapText(documentId: string, authFetch: AuthFet
 
 export async function runQuickAction(
   kind: "simple" | "short" | "test",
-  documentId: string,
+  documentIds: string[],
   authFetch: AuthFetch,
 ): Promise<string> {
-  const ctx = await contextFromDocument(documentId, authFetch);
+  const ctx = await contextFromDocuments(documentIds, authFetch);
   if (!ctx.trim()) {
     return "Текст документа не найден в индексе RAG после повторной индексации. Проверьте статус документа или загрузите файл снова.";
   }
@@ -211,8 +228,8 @@ export async function runQuickAction(
   return res.content;
 }
 
-export async function generateFlashcards(documentId: string, authFetch: AuthFetch): Promise<{ q: string; a: string }[]> {
-  const ctx = await contextFromDocument(documentId, authFetch);
+export async function generateFlashcards(documentIds: string[], authFetch: AuthFetch): Promise<{ q: string; a: string }[]> {
+  const ctx = await contextFromDocuments(documentIds, authFetch);
   if (!ctx.trim()) {
     return [
       {
@@ -264,11 +281,11 @@ ${PLAIN_TEXT_RULE}
 
 /** Таблица в CSV по содержимому документа из RAG (открывается в Excel). */
 export async function generateStructuredTableCsv(
-  documentId: string,
+  documentIds: string[],
   authFetch: AuthFetch,
   focus?: string,
 ): Promise<{ csv: string; model: string }> {
-  const ctx = await contextFromDocument(documentId, authFetch);
+  const ctx = await contextFromDocuments(documentIds, authFetch);
   if (!ctx.trim()) {
     throw new Error("Нет текста в индексе для извлечения таблицы.");
   }

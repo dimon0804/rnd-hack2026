@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 
 import httpx
 from fastapi import FastAPI
+from sqlalchemy import text
 
 from app.api.health import router as health_router
 from app.api.v1.documents import router as documents_router
@@ -9,9 +10,22 @@ from app.db.session import Base, engine
 from app.models import Document  # noqa: F401
 
 
+def _ensure_topic_group_column() -> None:
+    with engine.begin() as conn:
+        conn.execute(
+            text("ALTER TABLE documents ADD COLUMN IF NOT EXISTS topic_group_id UUID"),
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_documents_topic_group_id ON documents (topic_group_id)",
+            ),
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
+    _ensure_topic_group_column()
     async with httpx.AsyncClient(timeout=60.0) as client:
         app.state.http_client = client
         yield

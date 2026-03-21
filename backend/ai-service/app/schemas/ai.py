@@ -29,3 +29,20 @@ class ExtractTableRequest(BaseModel):
 class ExtractTableResponse(BaseModel):
     csv_text: str
     model: str
+
+
+class TopicGroupItem(BaseModel):
+    filename: str = Field(min_length=1, max_length=512)
+    preview: str = Field(min_length=0, max_length=12000)
+
+
+class TopicGroupsRequest(BaseModel):
+    """Фрагменты текстов для разбиения по теме (индексы 0..n-1)."""
+
+    items: list[TopicGroupItem] = Field(min_length=2, max_length=20)
+
+
+class TopicGroupsResponse(BaseModel):
+    """Списки индексов файлов; каждый индекс встречается ровно один раз."""
+
+    groups: list[list[int]]
