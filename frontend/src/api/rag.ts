@@ -45,6 +45,64 @@ export async function ragQuery(
   return data.results ?? [];
 }
 
+type AuthFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+
+/**
+ * Несколько документов: один глобальный top_k часто отдаёт все чанки из одного файла.
+ * Делаем отдельный запрос по каждому document_id, затем объединяем и режем по score.
+ */
+export async function ragQueryBalanced(
+  query: string,
+  authFetch: AuthFetch,
+  topK: number,
+  documentIds: string[],
+): Promise<RagChunk[]> {
+  const ids = documentIds.filter(Boolean);
+  if (ids.length <= 1) {
+    return ragQuery(query, authFetch, topK, ids.length === 1 ? ids : undefined);
+  }
+
+  const n = ids.length;
+  const perDoc = Math.max(3, Math.ceil(topK / n));
+  const perDocK = Math.min(12, perDoc);
+
+  const merged: RagChunk[] = [];
+  const seen = new Set<string>();
+  for (const docId of ids) {
+    const part = await ragQuery(query, authFetch, perDocK, [docId]);
+    for (const c of part) {
+      const key = `${c.document_id}:${c.chunk_id}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(c);
+    }
+  }
+  merged.sort((a, b) => b.score - a.score);
+  return merged.slice(0, topK);
+}
+
+/** Текст для system prompt: фрагменты с подписью файла. */
+export function formatRagChunksForLlm(
+  chunks: RagChunk[],
+  docLabel: (documentId: string) => string,
+  maxChars = 14000,
+): string {
+  const blocks: string[] = [];
+  let total = 0;
+  for (let i = 0; i < chunks.length; i++) {
+    const c = chunks[i];
+    const name = docLabel(c.document_id);
+    const block = `--- [${i + 1}] Файл: ${name} — чанк #${c.chunk_id}, релевантность ~${Math.round(Math.min(1, Math.max(0, c.score)) * 100)}% ---\n${c.text}`;
+    if (total + block.length > maxChars) {
+      blocks.push("… [контекст обрезан по длине]");
+      break;
+    }
+    blocks.push(block);
+    total += block.length;
+  }
+  return blocks.join("\n\n");
+}
+
 /** Все чанки документа по порядку (без TF-IDF) — надёжный контекст для саммари и карточек. */
 export async function ragDocumentChunks(
   documentId: string,

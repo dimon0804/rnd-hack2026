@@ -2596,6 +2596,19 @@ main:focus-visible {
   flex-shrink: 0;
 }
 
+.chat-cite__filename {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--ink);
+  opacity: 0.88;
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 12rem;
+}
+
 .chat-cite__score {
   font-variant-numeric: tabular-nums;
   font-weight: 600;

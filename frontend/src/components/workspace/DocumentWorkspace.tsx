@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import type { DocumentItem } from "../../api/documents";
+import { listDocuments } from "../../api/documents";
 import { aiChat } from "../../api/ai";
-import { ragQuery, type RagChunk } from "../../api/rag";
+import { formatRagChunksForLlm, ragQueryBalanced, type RagChunk } from "../../api/rag";
 import { documentStatusRu } from "../../lib/documentStatus";
 import {
   generateFlashcards,
@@ -100,7 +101,9 @@ export function DocumentWorkspace({ document }: Props) {
   const [infographicLoading, setInfographicLoading] = useState(false);
   const [infographicErr, setInfographicErr] = useState<string | null>(null);
   const [packageLoading, setPackageLoading] = useState(false);
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const [docNamesById, setDocNamesById] = useState<Record<string, string>>(() => ({
+    [document.id]: document.original_filename,
+  }));
 
   const st = document.status.trim().toLowerCase();
   const ready = st === "ready";
@@ -135,6 +138,28 @@ export function DocumentWorkspace({ document }: Props) {
   }, [ragIds, ready, authFetch]);
 
   useEffect(() => {
+    const base: Record<string, string> = { [document.id]: document.original_filename };
+    if (ragIds.length <= 1) {
+      setDocNamesById(base);
+      return;
+    }
+    let cancelled = false;
+    void listDocuments(authFetch).then((docs) => {
+      const m: Record<string, string> = { ...base };
+      for (const d of docs) {
+        if (ragIds.includes(d.id)) m[d.id] = d.original_filename;
+      }
+      for (const id of ragIds) {
+        if (!m[id]) m[id] = `файл ${id.slice(0, 8)}…`;
+      }
+      if (!cancelled) setDocNamesById(m);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [ragIds, document.id, document.original_filename, authFetch]);
+
+  useEffect(() => {
     if (!videoPlan) {
       setVideoSceneImages({});
       return;
@@ -162,15 +187,22 @@ export function DocumentWorkspace({ document }: Props) {
     setMessages((m) => [...m, { role: "user", content: text }]);
     setChatBusy(true);
     try {
-      const chunks = await ragQuery(text, authFetch, 6, ragIds);
-      const ctx = chunks.map((c) => c.text).join("\n\n").slice(0, 12000);
-      /** В подсказках к источникам — один самый релевантный чанк (RAG уже отсортирован по score). */
-      const sourceChunksForUi = chunks.length > 0 ? [chunks[0]] : [];
+      const chatTopK = ragIds.length > 1 ? 12 : 6;
+      const chunks = await ragQueryBalanced(text, authFetch, chatTopK, ragIds);
+      const label = (id: string) => docNamesById[id] ?? `файл ${id.slice(0, 8)}…`;
+      const ctx = formatRagChunksForLlm(chunks, label, 14000);
+      /** Несколько файлов — до 4 источников; один файл — один чанк (как раньше). */
+      const sourceChunksForUi =
+        chunks.length > 0 ? chunks.slice(0, ragIds.length > 1 ? 4 : 1) : [];
       const scope =
         ragIds.length > 1
-          ? "загруженным связанным документам (одна тема)"
+          ? "нескольким загруженным файлам (одна тематическая группа)"
           : "этому документу";
-      const system = `Помощник по материалам пользователя (${scope}). Отвечай на русском только по приведённому контексту. Если в контексте нет ответа — скажи об этом. Пиши обычным текстом, без markdown (#, **, обратные кавычки).\n\nКонтекст:\n${ctx || "(пусто)"}`;
+      const multiRules =
+        ragIds.length > 1
+          ? " Контекст размечен по имени файла — связывай факты с указанным файлом; при общем вопросе используй все релевантные фрагменты; не смешивай сведения из разных файлов без пометки."
+          : "";
+      const system = `Помощник по материалам пользователя (${scope}). Отвечай на русском только по приведённому контексту. Если в контексте нет ответа — скажи об этом. Пиши обычным текстом, без markdown (#, **, обратные кавычки).${multiRules}\n\nКонтекст:\n${ctx || "(пусто)"}`;
       const reply = await aiChat(text, system, authFetch, { maxTokens: 1200 });
       setMessages((m) => [...m, { role: "assistant", content: reply.content, sourceChunks: sourceChunksForUi }]);
     } catch (e) {
@@ -188,14 +220,21 @@ export function DocumentWorkspace({ document }: Props) {
     setMessages((m) => [...m, { role: "user", content: t.label }]);
     setChatBusy(true);
     try {
-      const chunks = await ragQuery(t.ragQuery, authFetch, 6, ragIds);
-      const ctx = chunks.map((c) => c.text).join("\n\n").slice(0, 12000);
-      const sourceChunksForUi = chunks.length > 0 ? [chunks[0]] : [];
+      const tplTopK = ragIds.length > 1 ? 12 : 6;
+      const chunks = await ragQueryBalanced(t.ragQuery, authFetch, tplTopK, ragIds);
+      const label = (id: string) => docNamesById[id] ?? `файл ${id.slice(0, 8)}…`;
+      const ctx = formatRagChunksForLlm(chunks, label, 14000);
+      const sourceChunksForUi =
+        chunks.length > 0 ? chunks.slice(0, ragIds.length > 1 ? 4 : 1) : [];
       const scope =
         ragIds.length > 1
-          ? "загруженным связанным документам (одна тема)"
+          ? "нескольким загруженным файлам (одна тематическая группа)"
           : "этому документу";
-      const system = `Помощник по материалам пользователя (${scope}). Отвечай на русском только по приведённому контексту. Если в контексте нет ответа — скажи об этом. Пиши обычным текстом, без markdown (#, **, обратные кавычки).\n\nКонтекст:\n${ctx || "(пусто)"}`;
+      const multiRules =
+        ragIds.length > 1
+          ? " Контекст размечен по имени файла — связывай факты с указанным файлом; при общем вопросе используй все релевантные фрагменты."
+          : "";
+      const system = `Помощник по материалам пользователя (${scope}). Отвечай на русском только по приведённому контексту. Если в контексте нет ответа — скажи об этом. Пиши обычным текстом, без markdown (#, **, обратные кавычки).${multiRules}\n\nКонтекст:\n${ctx || "(пусто)"}`;
       const reply = await aiChat(t.llmInstruction, system, authFetch, { maxTokens: 1400 });
       setMessages((m) => [...m, { role: "assistant", content: reply.content, sourceChunks: sourceChunksForUi }]);
     } catch (e) {
@@ -446,10 +485,6 @@ export function DocumentWorkspace({ document }: Props) {
     }
   };
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
-
   const statusLabel = documentStatusRu(document.status);
 
   return (
@@ -674,8 +709,18 @@ export function DocumentWorkspace({ document }: Props) {
           {tab === "chat" ? (
             <div className="tab-panel tab-panel--chat">
               <p className="chat-hint">
-                Вопросы только по этому файлу. Под ответом — один фрагмент индекса, наиболее близкий к вопросу (чанк,
-                релевантность, текст). 🎤 — загрузить аудио, 🎙️ — голосовое в текст (STT через{" "}
+                {ragIds.length > 1 ? (
+                  <>
+                    Вопросы по <strong>всем {ragIds.length} файлам</strong> группы: поиск сбалансирован по каждому файлу, в
+                    контексте — подписи имён. Под ответом — до четырёх фрагментов-источников.
+                  </>
+                ) : (
+                  <>
+                    Вопросы только по этому файлу. Под ответом — один фрагмент индекса, наиболее близкий к вопросу (чанк,
+                    релевантность, текст).
+                  </>
+                )}{" "}
+                🎤 — загрузить аудио, 🎙️ — голосовое в текст (STT через{" "}
                 <code style={styles.codeSm}>STT_BASE_URL</code>, для
                 хакатона часто порт <strong>6640</strong>).
               </p>
@@ -703,12 +748,11 @@ export function DocumentWorkspace({ document }: Props) {
                       <span className="chat-label">{msg.role === "user" ? "Вы" : "Ответ"}</span>
                       <p>{msg.content}</p>
                       {msg.role === "assistant" && msg.sourceChunks && msg.sourceChunks.length > 0 ? (
-                        <ChatSourceCitations chunks={msg.sourceChunks} />
+                        <ChatSourceCitations chunks={msg.sourceChunks} docLabels={docNamesById} />
                       ) : null}
                     </div>
                   ))}
                   {chatBusy ? <p style={styles.muted}>Ищем в документе…</p> : null}
-                  <div ref={bottomRef} />
                 </div>
               </div>
               <div className="chat-composer">
@@ -1113,7 +1157,7 @@ export function DocumentWorkspace({ document }: Props) {
   );
 }
 
-function ChatSourceCitations({ chunks }: { chunks: RagChunk[] }) {
+function ChatSourceCitations({ chunks, docLabels }: { chunks: RagChunk[]; docLabels?: Record<string, string> }) {
   return (
     <div className="chat-cites" role="group" aria-label="Источники по индексу RAG">
       <div className="chat-cites__label">{chunks.length === 1 ? "Источник" : "Источники"}</div>
@@ -1122,11 +1166,17 @@ function ChatSourceCitations({ chunks }: { chunks: RagChunk[] }) {
           const key = `${c.document_id}-${c.chunk_id}-${idx}`;
           const peek = c.text.replace(/\s+/g, " ").trim();
           const peekShort = peek.length > 100 ? `${peek.slice(0, 100)}…` : peek;
+          const fileTitle = docLabels?.[c.document_id] ?? null;
           return (
             <li key={key}>
               <details className="chat-cite">
                 <summary className="chat-cite__summary">
                   <span className="chat-cite__chip">Чанк #{c.chunk_id}</span>
+                  {fileTitle ? (
+                    <span className="chat-cite__filename" title={fileTitle}>
+                      {fileTitle.length > 36 ? `${fileTitle.slice(0, 34)}…` : fileTitle}
+                    </span>
+                  ) : null}
                   <span className="chat-cite__score" title="Релевантность (оценка поиска)">
                     {Math.round(Math.min(1, Math.max(0, c.score)) * 100)}%
                   </span>
@@ -1134,7 +1184,7 @@ function ChatSourceCitations({ chunks }: { chunks: RagChunk[] }) {
                 </summary>
                 <div className="chat-cite__body">
                   <p className="chat-cite__docid">
-                    <span className="muted">Документ</span>{" "}
+                    <span className="muted">Файл</span> {fileTitle ? <strong>{fileTitle}</strong> : null}{" "}
                     <code className="chat-cite__uuid" title={c.document_id}>
                       {c.document_id.slice(0, 8)}…
                     </code>

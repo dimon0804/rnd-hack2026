@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useState, type CSSProperties } from "react";
 import { Link } from "react-router-dom";
 import { aiChat } from "../api/ai";
 import { listDocuments } from "../api/documents";
 import type { RagChunk } from "../api/rag";
-import { ragQuery } from "../api/rag";
+import { formatRagChunksForLlm, ragQuery, ragQueryBalanced } from "../api/rag";
 import { humanizeChatError } from "../lib/apiError";
 import { useAuth } from "../context/AuthContext";
 import { SttChatToolbar } from "./SttChatToolbar";
@@ -16,26 +16,23 @@ function isReady(d: { status: string }): boolean {
   return d.status.trim().toLowerCase() === "ready";
 }
 
-function buildSystemPrompt(chunks: RagChunk[]): string {
-  const intro =
-    "Ты помощник по документам пользователя. Отвечай на русском. Пиши обычным текстом, без markdown (заголовки #, **жирный**, обратные кавычки). Ниже — только фрагменты из файлов этого пользователя. Опирайся на них; если ответа нет — скажи прямо, не выдумывай.";
+function buildSystemPrompt(
+  chunks: RagChunk[],
+  docNames: Record<string, string>,
+  multiDoc: boolean,
+): string {
+  const intro = multiDoc
+    ? "Ты помощник по нескольким документам пользователя. Отвечай на русском. Пиши обычным текстом, без markdown (заголовки #, **жирный**, обратные кавычки). Фрагменты подписаны именами файлов — сопоставляй ответ с нужным файлом; при общем вопросе используй все релевантные блоки. Опирайся на приведённый текст; если ответа нет — скажи прямо, не выдумывай."
+    : "Ты помощник по документам пользователя. Отвечай на русском. Пиши обычным текстом, без markdown (заголовки #, **жирный**, обратные кавычки). Ниже — только фрагменты из файлов этого пользователя. Опирайся на них; если ответа нет — скажи прямо, не выдумывай.";
   if (!chunks.length) {
     return `${intro}\n\nПо запросу не найдено релевантных фрагментов в индексе (или индекс пуст после перезапуска сервера). Ответь кратко и предложи загрузить документы на странице загрузки.`;
   }
-  const blocks: string[] = [];
-  let total = 0;
-  for (let i = 0; i < chunks.length; i++) {
-    const c = chunks[i];
-    const shortId = c.document_id.length > 12 ? `${c.document_id.slice(0, 8)}…` : c.document_id;
-    const block = `--- Фрагмент ${i + 1} (документ ${shortId}) ---\n${c.text}`;
-    if (total + block.length > MAX_CONTEXT_CHARS) {
-      blocks.push("… [контекст обрезан по длине]");
-      break;
-    }
-    blocks.push(block);
-    total += block.length;
-  }
-  return `${intro}\n\n${blocks.join("\n\n")}`;
+  const body = formatRagChunksForLlm(
+    chunks,
+    (id) => docNames[id] ?? (id.length > 12 ? `${id.slice(0, 8)}…` : id),
+    MAX_CONTEXT_CHARS,
+  );
+  return `${intro}\n\n${body}`;
 }
 
 export function ChatPanel() {
@@ -46,16 +43,6 @@ export function ChatPanel() {
   const [lastChunks, setLastChunks] = useState<RagChunk[]>([]);
   const [readyCount, setReadyCount] = useState<number | null>(null);
   const [sttBusy, setSttBusy] = useState(false);
-  const bottomRef = useRef<HTMLDivElement>(null);
-
-  const scrollToBottom = useCallback(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, []);
-
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages, scrollToBottom]);
-
   const refreshReadyCount = useCallback(async () => {
     try {
       const docs = await listDocuments(authFetch);
@@ -89,9 +76,14 @@ export function ChatPanel() {
         return;
       }
 
-      const chunks = await ragQuery(text, authFetch, 6, indexedIds);
+      const docNames = Object.fromEntries(myDocs.map((d) => [d.id, d.original_filename]));
+      const multi = indexedIds.length > 1;
+      const topK = multi ? 12 : 6;
+      const chunks = multi
+        ? await ragQueryBalanced(text, authFetch, topK, indexedIds)
+        : await ragQuery(text, authFetch, topK, indexedIds);
       setLastChunks(chunks);
-      const systemPrompt = buildSystemPrompt(chunks);
+      const systemPrompt = buildSystemPrompt(chunks, docNames, multi);
       const reply = await aiChat(text, systemPrompt, authFetch, { maxTokens: 1200 });
       setMessages((m) => [...m, { role: "assistant", content: reply.content }]);
     } catch (e) {
@@ -163,7 +155,6 @@ export function ChatPanel() {
               Ищем фрагменты в ваших документах и формируем ответ…
             </p>
           ) : null}
-          <div ref={bottomRef} />
         </div>
 
         {lastChunks.length > 0 ? (
