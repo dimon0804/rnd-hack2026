@@ -14,6 +14,7 @@ class DocumentResponse(BaseModel):
     created_at: datetime
     topic_group_id: uuid.UUID | None = None
     group_document_ids: list[uuid.UUID] = Field(default_factory=list)
+    collection_ids: list[uuid.UUID] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}
 

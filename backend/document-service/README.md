@@ -7,6 +7,8 @@
 - `POST /api/v1/documents/upload` — `multipart/form-data`, поле `file`
 - `GET /api/v1/documents` — список документов пользователя (нужен `Authorization: Bearer`)
 - `GET /api/v1/documents/{id}` — карточка документа
+- `GET /api/v1/documents/{id}/file` — скачать оригинальный файл (те же права, что у карточки)
+- **Коллекции** (папки пользователя: «Работа», «Учёба»…): `GET|POST /api/v1/documents/collections`, `PATCH|DELETE /api/v1/documents/collections/{id}`, `PATCH /api/v1/documents/{id}/collections` (тело `{ "collection_ids": ["uuid", ...] }`). Список документов: `GET /api/v1/documents?collection_id=uuid`. При загрузке: form-поле `collection_ids` — JSON-массив uuid.
 
 ## Переменные окружения
 

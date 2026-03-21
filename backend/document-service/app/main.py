@@ -8,6 +8,7 @@ from app.api.health import router as health_router
 from app.api.v1.documents import router as documents_router
 from app.db.session import Base, engine
 from app.models import Document  # noqa: F401
+from app.models.collection import DocumentCollection, DocumentCollectionMember  # noqa: F401
 
 
 def _ensure_topic_group_column() -> None:
