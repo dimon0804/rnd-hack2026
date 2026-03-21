@@ -17,6 +17,16 @@ export type InfographicSpec = {
   footnote_ru?: string;
 };
 
+function coerceMetricValue(v: unknown): number {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string") {
+    const t = v.trim().replace(/\s/g, "").replace(",", ".");
+    const n = Number(t);
+    if (!Number.isNaN(n) && Number.isFinite(n)) return n;
+  }
+  return NaN;
+}
+
 export function parseInfographicJson(raw: string): InfographicSpec {
   const data = parseAiJsonObject(raw);
   if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("Некорректный JSON: ожидался объект");
@@ -33,7 +43,7 @@ export function parseInfographicJson(raw: string): InfographicSpec {
       if (!row || typeof row !== "object") continue;
       const r = row as Record<string, unknown>;
       const label = String(r.label ?? "").trim();
-      const value = Number(r.value);
+      const value = coerceMetricValue(r.value);
       if (!label || Number.isNaN(value)) continue;
       items.push({
         label: label.slice(0, 120),

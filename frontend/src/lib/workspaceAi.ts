@@ -393,8 +393,8 @@ export async function generateInfographicSpec(documentIds: string[], authFetch: 
     throw new Error("Нет текста в индексе для инфографики.");
   }
   const multi = documentIds.length > 1;
-  const system = `Ты аналитик данных. Извлеки из текста ЧИСЛА с подписями (показатели, проценты, объёмы, сроки в виде чисел).
-Верни ТОЛЬКО один JSON без markdown и без \`\`\`.
+  const systemFull = `Ты аналитик данных. Извлеки из текста ЧИСЛА с подписями (показатели, проценты, объёмы, сроки в виде чисел).
+Ответ — один JSON-объект (без markdown, без \`\`\`, без текста до или после JSON).
 
 Схема:
 {
@@ -410,10 +410,29 @@ export async function generateInfographicSpec(documentIds: string[], authFetch: 
 6–16 пунктов; value — число (для процентов как 12.5, не строка). Только то, что есть в материале; если цифр мало — возьми главные 4–6.
 Внутри строк JSON не используй неэкранированные двойные кавычки — замени на «ёлочки» в тексте или экранируй как \\". Не ставь запятую после последнего элемента в массиве или объекте. Без комментариев // в JSON.
 ${multi ? "Учитывай все связанные документы; подписи различай по контексту." : ""}`;
-  const res = await aiChat(`Текст для извлечения метрик:\n\n${ctx}`, system, authFetch, {
-    maxTokens: 2200,
-    temperature: 0.2,
-    stripMarkdown: false,
-  });
-  return parseInfographicJson(res.content);
+  const systemMinimal = `Извлеки из текста числа с короткими подписями. Ответ — один JSON-объект, без markdown, без \`\`\`.
+Обязательные поля: "title" (строка), "chart_type" ("bar" или "horizontal_bar" или "donut"), "items" (массив).
+Каждый элемент items: {"label":"до 80 символов","value": число}. Минимум 4 элемента, максимум 12. value — только число, не строка.
+Подписи без символа двойной кавычки внутри — используй короткие формулировки.
+${multi ? "Источников несколько — объедини по смыслу." : ""}`;
+
+  const prompt = `Текст для извлечения метрик:\n\n${ctx}`;
+  let lastErr: Error | undefined;
+  for (const [system, opts] of [
+    [systemFull, { maxTokens: 2200, temperature: 0.2 }] as const,
+    [systemMinimal, { maxTokens: 1600, temperature: 0.1 }] as const,
+  ]) {
+    try {
+      const res = await aiChat(prompt, system, authFetch, {
+        maxTokens: opts.maxTokens,
+        temperature: opts.temperature,
+        stripMarkdown: false,
+        jsonMode: true,
+      });
+      return parseInfographicJson(res.content);
+    } catch (e) {
+      lastErr = e instanceof Error ? e : new Error(String(e));
+    }
+  }
+  throw lastErr ?? new Error("Не удалось построить инфографику");
 }

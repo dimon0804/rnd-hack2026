@@ -28,7 +28,13 @@ export async function aiChat(
   prompt: string,
   systemPrompt: string,
   authFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>,
-  options?: { temperature?: number; maxTokens?: number; stripMarkdown?: boolean },
+  options?: {
+    temperature?: number;
+    maxTokens?: number;
+    stripMarkdown?: boolean;
+    /** Строгий JSON-объект от LLM (сервер передаёт response_format json_object). */
+    jsonMode?: boolean;
+  },
 ): Promise<ChatResult> {
   const res = await authFetch(`${apiBase()}/api/v1/ai/chat`, {
     method: "POST",
@@ -38,12 +44,14 @@ export async function aiChat(
       system_prompt: systemPrompt,
       temperature: options?.temperature ?? 0.25,
       max_tokens: options?.maxTokens ?? 1200,
+      json_mode: options?.jsonMode === true,
     }),
   });
   if (!res.ok) throw new Error(await parseError(res));
   const raw = (await res.json()) as ChatResult;
+  const rawContent = typeof raw.content === "string" ? raw.content : raw.content != null ? String(raw.content) : "";
   const content =
-    options?.stripMarkdown === false ? raw.content : stripAiMarkdown(raw.content);
+    options?.stripMarkdown === false ? rawContent : stripAiMarkdown(rawContent);
   return { ...raw, content };
 }
 

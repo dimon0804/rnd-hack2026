@@ -64,6 +64,15 @@ function extractFromMarkdownFence(t: string): string | null {
   return m[1].trim();
 }
 
+/** Модель иногда оборачивает объект в массив из одного элемента — для UI нужен сам объект. */
+function unwrapSingleObjectArray(value: unknown): unknown {
+  if (Array.isArray(value) && value.length === 1) {
+    const v = value[0];
+    if (v !== null && typeof v === "object" && !Array.isArray(v)) return v;
+  }
+  return value;
+}
+
 /** Текст от модели → строка JSON-объекта. */
 export function extractJsonObjectString(raw: string): string {
   const t = raw.trim().replace(/^\uFEFF/, "");
@@ -89,9 +98,37 @@ function tryParseJson(s: string): unknown | null {
   }
 }
 
+function tryParseObjectWithRepair(s: string): unknown | null {
+  const trimmed = s.trim();
+  if (!trimmed) return null;
+  const direct = tryParseJson(trimmed);
+  if (direct !== null && typeof direct === "object") return unwrapSingleObjectArray(direct);
+  try {
+    const repaired = jsonrepair(trimmed);
+    const parsed = tryParseJson(repaired);
+    if (parsed !== null && typeof parsed === "object") return unwrapSingleObjectArray(parsed);
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
 /** Разбор JSON-объекта с несколькими попытками «починить» типичные ошибки модели. */
 export function parseAiJsonObject(raw: string): unknown {
-  const base = extractJsonObjectString(raw);
+  const full = String(raw ?? "")
+    .trim()
+    .replace(/^\uFEFF/, "");
+  if (!full) {
+    throw new Error(
+      "Пустой ответ модели. Повторите «Построить по данным» или проверьте LLM в настройках.",
+    );
+  }
+
+  // Сначала весь ответ целиком (часто срабатывает при json_mode + лишний текст снаружи).
+  const whole = tryParseObjectWithRepair(full);
+  if (whole !== null) return whole;
+
+  const base = extractJsonObjectString(full);
   const fixedLiterals = sanitizeInvalidJsonLiterals(base);
   const variants = [
     base,
@@ -105,11 +142,11 @@ export function parseAiJsonObject(raw: string): unknown {
   ];
   for (const v of variants) {
     const parsed = tryParseJson(v);
-    if (parsed !== null && typeof parsed === "object") return parsed;
+    if (parsed !== null && typeof parsed === "object") return unwrapSingleObjectArray(parsed);
     try {
       const repaired = jsonrepair(v);
       const parsed2 = tryParseJson(repaired);
-      if (parsed2 !== null && typeof parsed2 === "object") return parsed2;
+      if (parsed2 !== null && typeof parsed2 === "object") return unwrapSingleObjectArray(parsed2);
     } catch {
       /* следующий вариант */
     }
