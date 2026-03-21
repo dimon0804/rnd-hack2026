@@ -1,7 +1,6 @@
-import { useEffect, useRef, useState, type ChangeEvent, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { DocumentItem } from "../../api/documents";
 import { aiChat } from "../../api/ai";
-import { transcribeAudio } from "../../api/transcribe";
 import { ragQuery } from "../../api/rag";
 import { documentStatusRu } from "../../lib/documentStatus";
 import {
@@ -21,6 +20,7 @@ import { humanizeChatError } from "../../lib/apiError";
 import { useAuth } from "../../context/AuthContext";
 import { MindmapView } from "./MindmapView";
 import { ProcessingOverlay } from "./ProcessingOverlay";
+import { SttChatToolbar } from "../SttChatToolbar";
 
 type Tab = "summary" | "simple" | "short" | "report" | "table" | "chat" | "tests" | "flashcards" | "mindmap";
 
@@ -63,7 +63,6 @@ export function DocumentWorkspace({ document }: Props) {
   const [tableLoading, setTableLoading] = useState(false);
   const [tableErr, setTableErr] = useState<string | null>(null);
   const [sttBusy, setSttBusy] = useState(false);
-  const sttInputRef = useRef<HTMLInputElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const st = document.status.trim().toLowerCase();
@@ -93,25 +92,9 @@ export function DocumentWorkspace({ document }: Props) {
     };
   }, [document.id, ready, authFetch]);
 
-  const onSttFile = async (e: ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0];
-    e.target.value = "";
-    if (!f || sttBusy) return;
-    setSttBusy(true);
-    try {
-      const text = await transcribeAudio(f, authFetch, { language: "ru" });
-      setChatInput((prev) => (prev ? `${prev.trim()}\n${text}` : text));
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Ошибка STT";
-      setMessages((m) => [...m, { role: "assistant", content: `STT: ${msg}` }]);
-    } finally {
-      setSttBusy(false);
-    }
-  };
-
   const sendChat = async () => {
     const text = chatInput.trim();
-    if (!text || chatBusy || !ready) return;
+    if (!text || chatBusy || !ready || sttBusy) return;
     setChatInput("");
     setMessages((m) => [...m, { role: "user", content: text }]);
     setChatBusy(true);
@@ -483,8 +466,9 @@ export function DocumentWorkspace({ document }: Props) {
           {tab === "chat" ? (
             <div style={styles.panelChat}>
               <p style={styles.chatHint}>
-                Вопросы только по этому файлу. Источники — внизу после ответа. Кнопка 🎤 — речь в текст через STT
-                (сервер из <code style={styles.codeSm}>STT_BASE_URL</code>, для хакатона обычно порт <strong>6640</strong>).
+                Вопросы только по этому файлу. Источники — внизу после ответа. 🎤 — загрузить аудио, 🎙️ — голосовое в
+                текст (STT через <code style={styles.codeSm}>STT_BASE_URL</code>, для хакатона часто порт{" "}
+                <strong>6640</strong>).
               </p>
               <div style={styles.chatThread}>
                 {messages.map((msg, i) => (
@@ -516,28 +500,23 @@ export function DocumentWorkspace({ document }: Props) {
                 </details>
               ) : null}
               <div style={styles.chatComposer}>
-                <input
-                  ref={sttInputRef}
-                  type="file"
-                  accept="audio/*,.webm,.wav,.mp3,.m4a,.ogg,.flac"
-                  style={{ display: "none" }}
-                  onChange={(e) => void onSttFile(e)}
+                <SttChatToolbar
+                  authFetch={authFetch}
+                  disabled={chatBusy || !ready}
+                  onComposerBlockChange={setSttBusy}
+                  onTextAppended={(text) =>
+                    setChatInput((prev) => (prev ? `${prev.trim()}\n${text}` : text))
+                  }
+                  onSttError={(msg) =>
+                    setMessages((m) => [...m, { role: "assistant", content: `STT: ${msg}` }])
+                  }
                 />
-                <button
-                  type="button"
-                  style={styles.sttBtn}
-                  disabled={chatBusy || !ready || sttBusy}
-                  title="Аудио → текст в поле"
-                  onClick={() => sttInputRef.current?.click()}
-                >
-                  {sttBusy ? "…" : "🎤"}
-                </button>
                 <textarea
                   style={styles.textarea}
                   rows={2}
                   placeholder="Например: объясни как школьнику…"
                   value={chatInput}
-                  disabled={chatBusy || !ready}
+                  disabled={chatBusy || !ready || sttBusy}
                   onChange={(e) => setChatInput(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" && !e.shiftKey) {
@@ -546,7 +525,12 @@ export function DocumentWorkspace({ document }: Props) {
                     }
                   }}
                 />
-                <button type="button" style={styles.sendBtn} disabled={chatBusy || !ready} onClick={() => void sendChat()}>
+                <button
+                  type="button"
+                  style={styles.sendBtn}
+                  disabled={chatBusy || !ready || sttBusy}
+                  onClick={() => void sendChat()}
+                >
                   Отправить
                 </button>
               </div>
@@ -797,17 +781,6 @@ const styles: Record<string, CSSProperties> = {
   srcOl: { margin: "8px 0 0", paddingLeft: 18 },
   srcMeta: { color: "var(--accent)", fontWeight: 600 },
   chatComposer: { display: "flex", gap: 8, padding: 14, borderTop: "1px solid var(--border)", marginTop: "auto", alignItems: "flex-end" },
-  sttBtn: {
-    width: 44,
-    minHeight: 48,
-    flexShrink: 0,
-    borderRadius: 10,
-    border: "1px solid var(--border)",
-    background: "rgba(255,255,255,0.06)",
-    fontSize: "1rem",
-    cursor: "pointer",
-    color: "var(--text)",
-  },
   textarea: {
     flex: 1,
     minHeight: 48,

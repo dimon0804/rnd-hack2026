@@ -1,12 +1,12 @@
-import { useCallback, useEffect, useRef, useState, type ChangeEvent, type CSSProperties } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { Link } from "react-router-dom";
 import { aiChat } from "../api/ai";
-import { transcribeAudio } from "../api/transcribe";
 import { listDocuments } from "../api/documents";
 import type { RagChunk } from "../api/rag";
 import { ragQuery } from "../api/rag";
 import { humanizeChatError } from "../lib/apiError";
 import { useAuth } from "../context/AuthContext";
+import { SttChatToolbar } from "./SttChatToolbar";
 
 type Msg = { role: "user" | "assistant"; content: string };
 
@@ -46,7 +46,6 @@ export function ChatPanel() {
   const [lastChunks, setLastChunks] = useState<RagChunk[]>([]);
   const [readyCount, setReadyCount] = useState<number | null>(null);
   const [sttBusy, setSttBusy] = useState(false);
-  const sttInputRef = useRef<HTMLInputElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = useCallback(() => {
@@ -70,25 +69,9 @@ export function ChatPanel() {
     void refreshReadyCount();
   }, [refreshReadyCount]);
 
-  const onSttFile = async (e: ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0];
-    e.target.value = "";
-    if (!f || sttBusy) return;
-    setSttBusy(true);
-    try {
-      const text = await transcribeAudio(f, authFetch, { language: "ru" });
-      setInput((prev) => (prev ? `${prev.trim()}\n${text}` : text));
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Ошибка распознавания";
-      setMessages((m) => [...m, { role: "assistant", content: `STT: ${msg}` }]);
-    } finally {
-      setSttBusy(false);
-    }
-  };
-
   const send = async () => {
     const text = input.trim();
-    if (!text || busy) return;
+    if (!text || busy || sttBusy) return;
     setInput("");
     setMessages((m) => [...m, { role: "user", content: text }]);
     setBusy(true);
@@ -203,28 +186,21 @@ export function ChatPanel() {
         ) : null}
 
         <div style={styles.composer}>
-          <input
-            ref={sttInputRef}
-            type="file"
-            accept="audio/*,.webm,.wav,.mp3,.m4a,.ogg,.flac"
-            style={{ display: "none" }}
-            onChange={(e) => void onSttFile(e)}
+          <SttChatToolbar
+            authFetch={authFetch}
+            disabled={busy}
+            onComposerBlockChange={setSttBusy}
+            onTextAppended={(text) => setInput((prev) => (prev ? `${prev.trim()}\n${text}` : text))}
+            onSttError={(msg) =>
+              setMessages((m) => [...m, { role: "assistant", content: `STT: ${msg}` }])
+            }
           />
-          <button
-            type="button"
-            style={styles.sttBtn}
-            disabled={busy || sttBusy}
-            title="Речь в текст: STT через бэкенд (STT_BASE_URL на ai-service, для хакатона часто порт 6640)"
-            onClick={() => sttInputRef.current?.click()}
-          >
-            {sttBusy ? "…" : "🎤"}
-          </button>
           <textarea
             style={styles.textarea}
             rows={2}
             placeholder="Ваш вопрос по содержанию файлов…"
             value={input}
-            disabled={busy}
+            disabled={busy || sttBusy}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
@@ -233,7 +209,12 @@ export function ChatPanel() {
               }
             }}
           />
-          <button type="button" style={styles.sendBtn} disabled={busy || !input.trim()} onClick={() => void send()}>
+          <button
+            type="button"
+            style={styles.sendBtn}
+            disabled={busy || sttBusy || !input.trim()}
+            onClick={() => void send()}
+          >
             {busy ? "…" : "Отправить"}
           </button>
         </div>
@@ -384,17 +365,6 @@ const styles: Record<string, CSSProperties> = {
     padding: "14px 16px",
     borderTop: "1px solid var(--border)",
     background: "rgba(0,0,0,0.2)",
-  },
-  sttBtn: {
-    width: 48,
-    height: 52,
-    flexShrink: 0,
-    borderRadius: 12,
-    border: "1px solid var(--border)",
-    background: "rgba(255,255,255,0.06)",
-    fontSize: "1.1rem",
-    cursor: "pointer",
-    color: "var(--text)",
   },
   textarea: {
     flex: 1,
