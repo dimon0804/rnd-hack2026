@@ -1074,11 +1074,19 @@ function FlashCard({ q, a }: { q: string; a: string }) {
       className={`flash-card${flipped ? " is-flipped" : ""}`}
       onClick={() => setFlipped(!flipped)}
     >
-      <span className="chat-label">{flipped ? "Ответ" : "Вопрос"}</span>
-      <span className="flash-face">{flipped ? a : q}</span>
-      <span className="muted small" style={{ display: "block", marginTop: 8 }}>
-        Нажмите, чтобы перевернуть
+      <span className="flash-card__flip">
+        <span className="flash-card__inner">
+          <span className="flash-card__face flash-card__face--front">
+            <span className="chat-label">Вопрос</span>
+            <span className="flash-face">{q}</span>
+          </span>
+          <span className="flash-card__face flash-card__face--back">
+            <span className="chat-label">Ответ</span>
+            <span className="flash-face">{a}</span>
+          </span>
+        </span>
       </span>
+      <span className="flash-card__hint muted small">Нажмите, чтобы перевернуть</span>
     </button>
   );
 }
