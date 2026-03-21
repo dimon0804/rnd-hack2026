@@ -1,5 +1,7 @@
 /** Общая модель слайдов (Gamma-подобная логика: мало текста, чёткая структура). */
 
+import { parseAiJsonObject } from "./aiJsonParse";
+
 export type GammaSlide =
   | { type: "title"; title: string; subtitle: string; image_hint?: string }
   | { type: "content"; title: string; bullets: string[]; image_hint?: string }
@@ -15,17 +17,8 @@ function normalizeBullets(b: unknown): string[] {
 
 /** Парсинг JSON из ответа LLM (возможны обёртки ```json). */
 export function parseGammaDeckJson(raw: string): GammaDeck {
-  const t = raw.trim();
-  let jsonStr = t;
-  const fence = /^```(?:json)?\s*([\s\S]*?)```$/m.exec(t);
-  if (fence) jsonStr = fence[1].trim();
-  else {
-    const start = t.indexOf("{");
-    const end = t.lastIndexOf("}");
-    if (start >= 0 && end > start) jsonStr = t.slice(start, end + 1);
-  }
-  const data = JSON.parse(jsonStr) as unknown;
-  if (!data || typeof data !== "object") throw new Error("Некорректный JSON");
+  const data = parseAiJsonObject(raw);
+  if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("Некорректный JSON");
   const o = data as Record<string, unknown>;
   const deck_title = String(o.deck_title ?? "Презентация").trim() || "Презентация";
   const slidesIn = o.slides;

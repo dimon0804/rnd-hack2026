@@ -3106,6 +3106,228 @@ select.input-select option {
   }
 }
 
+/* --- Workspace: инфографика и видео-план --- */
+.infographic-chart {
+  margin-top: 1rem;
+  padding: 1rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+}
+
+.infographic-chart--bar .infographic-bars {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 0.5rem;
+  min-height: 200px;
+  padding: 0 0.25rem;
+}
+
+.infographic-bcol {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.infographic-btrack {
+  width: 100%;
+  max-width: 72px;
+  height: 140px;
+  margin: 0 auto;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+}
+
+.infographic-bfill {
+  width: 100%;
+  min-height: 4px;
+  border-radius: 6px 6px 0 0;
+  transition: height 0.35s var(--ease);
+}
+
+.infographic-bval {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text);
+  text-align: center;
+}
+
+.infographic-blabel {
+  font-size: 0.68rem;
+  color: var(--muted);
+  text-align: center;
+  line-height: 1.25;
+  max-height: 2.6em;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.infographic-chart--hbar .infographic-hrow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2.2fr) auto;
+  gap: 0.5rem 0.75rem;
+  align-items: center;
+  margin-bottom: 0.65rem;
+}
+
+.infographic-hlabel {
+  font-size: 0.78rem;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.infographic-htrack {
+  height: 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
+  overflow: hidden;
+}
+
+.infographic-hfill {
+  height: 100%;
+  border-radius: 999px;
+  min-width: 4px;
+}
+
+.infographic-hval {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.infographic-chart--donut {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.25rem;
+  align-items: center;
+}
+
+.infographic-donut-wrap {
+  position: relative;
+  width: min(200px, 42vw);
+  height: min(200px, 42vw);
+  flex-shrink: 0;
+}
+
+.infographic-donut {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+}
+
+.infographic-donut-hole {
+  position: absolute;
+  inset: 22%;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--surface) 96%, transparent);
+  border: 1px solid var(--border);
+  pointer-events: none;
+}
+
+.infographic-legend {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  flex: 1 1 200px;
+  min-width: min(100%, 220px);
+}
+
+.infographic-legend li {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.45rem;
+  font-size: 0.82rem;
+}
+
+.infographic-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.infographic-legend-label {
+  flex: 1;
+  min-width: 0;
+  color: var(--text);
+}
+
+.infographic-legend-val {
+  font-weight: 600;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.video-scene-grid {
+  display: grid;
+  gap: 1rem;
+  margin-top: 0.75rem;
+}
+
+@media (min-width: 720px) {
+  .video-scene-grid {
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  }
+}
+
+.video-scene-card {
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  overflow: hidden;
+  background: color-mix(in srgb, var(--surface) 90%, transparent);
+}
+
+.video-scene-thumb {
+  aspect-ratio: 16 / 9;
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.video-scene-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.video-scene-body {
+  padding: 0.75rem 0.9rem 1rem;
+}
+
+.video-scene-meta {
+  font-size: 0.72rem;
+  color: var(--muted);
+  margin-bottom: 0.35rem;
+}
+
+.video-scene-title {
+  margin: 0 0 0.5rem;
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.video-scene-voice {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: var(--text);
+  white-space: pre-wrap;
+}
+
 /* --- Premium polish: шапка и кнопка темы --- */
 .site-header {
   transition:

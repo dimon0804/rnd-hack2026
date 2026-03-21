@@ -1,7 +1,9 @@
 import { aiChat, aiExtractTable } from "../api/ai";
 import { reindexDocument } from "../api/documents";
 import { ragDocumentChunks, ragQuery, type RagChunk } from "../api/rag";
+import { parseInfographicJson, type InfographicSpec } from "./infographicSpec";
 import { stripAiMarkdown } from "./stripAiMarkdown";
+import { parseVideoRecapJson, type VideoRecapPlan } from "./videoRecapPlan";
 
 const MAX_CTX = 12000;
 
@@ -243,6 +245,7 @@ ${multi ? "Несколько связанных документов — лог
   const res = await aiChat(`Исходный текст:\n\n${ctx}`, system, authFetch, {
     maxTokens: 3200,
     temperature: 0.22,
+    stripMarkdown: false,
   });
   return res.content.trim();
 }
@@ -338,4 +341,79 @@ export async function generateStructuredTableCsv(
   }
   const res = await aiExtractTable(ctx, authFetch, { focus, maxTokens: 2200 });
   return { csv: res.csv_text, model: res.model };
+}
+
+export type { InfographicSpec } from "./infographicSpec";
+export type { VideoRecapPlan } from "./videoRecapPlan";
+
+/**
+ * План видео-пересказа: сцены с кадром (image_hint → сток) и текстом озвучки.
+ * Сборка в один MP4 не выполняется — только единый сценарий и тайминги для монтажа.
+ */
+export async function generateVideoRecapPlan(documentIds: string[], authFetch: AuthFetch): Promise<VideoRecapPlan> {
+  const ctx = await contextFromDocuments(documentIds, authFetch);
+  if (!ctx.trim()) {
+    throw new Error("Нет текста в индексе для сценария видео.");
+  }
+  const multi = documentIds.length > 1;
+  const system = `Ты режиссёр короткого образовательного видео. Текст озвучки — только русский.
+Верни ТОЛЬКО один JSON-объект без markdown, без \`\`\`, без комментариев до или после.
+
+Схема:
+{
+  "video_title": "название ролика",
+  "total_duration_sec": число (сумма сцен или ориентир),
+  "narrator_note_ru": "опционально — тон, темп, ударения для диктора",
+  "scenes": [
+    {
+      "scene_index": 1,
+      "title_ru": "заголовок сцены",
+      "voiceover_ru": "текст для озвучки: 2–5 предложений, только факты из источника",
+      "duration_sec": 12,
+      "image_hint_en": "english stock photo phrase 6–14 words, concrete visual scene"
+    }
+  ]
+}
+
+Правила: 5–8 сцен; duration_sec у каждой 8–20; озвучка опирается на приведённый материал, без выдуманных цифр.
+image_hint_en — визуал для стока (латиница), в духе слайдов Gamma: не абстрактный «business», а что увидит зритель.
+${multi ? "Несколько документов — логичная последовательность, без дублирования." : ""}`;
+  const res = await aiChat(`Материал для сценария:\n\n${ctx}`, system, authFetch, {
+    maxTokens: 3400,
+    temperature: 0.24,
+    stripMarkdown: false,
+  });
+  return parseVideoRecapJson(res.content);
+}
+
+/** Инфографика: числа из источников и тип диаграммы для отрисовки в UI. */
+export async function generateInfographicSpec(documentIds: string[], authFetch: AuthFetch): Promise<InfographicSpec> {
+  const ctx = await contextFromDocuments(documentIds, authFetch);
+  if (!ctx.trim()) {
+    throw new Error("Нет текста в индексе для инфографики.");
+  }
+  const multi = documentIds.length > 1;
+  const system = `Ты аналитик данных. Извлеки из текста ЧИСЛА с подписями (показатели, проценты, объёмы, сроки в виде чисел).
+Верни ТОЛЬКО один JSON без markdown и без \`\`\`.
+
+Схема:
+{
+  "title": "заголовок блока",
+  "subtitle": "опционально",
+  "chart_type": "bar" | "horizontal_bar" | "donut",
+  "items": [
+    { "label": "подпись", "value": число, "unit": "опционально млн, %, ч", "source_hint": "кратко откуда в тексте" }
+  ],
+  "footnote_ru": "опционально — оговорки по данным"
+}
+
+6–16 пунктов; value — число (для процентов как 12.5, не строка). Только то, что есть в материале; если цифр мало — возьми главные 4–6.
+Внутри строк JSON не используй неэкранированные двойные кавычки — замени на «ёлочки» в тексте или экранируй как \\". Не ставь запятую после последнего элемента в массиве или объекте. Без комментариев // в JSON.
+${multi ? "Учитывай все связанные документы; подписи различай по контексту." : ""}`;
+  const res = await aiChat(`Текст для извлечения метрик:\n\n${ctx}`, system, authFetch, {
+    maxTokens: 2200,
+    temperature: 0.2,
+    stripMarkdown: false,
+  });
+  return parseInfographicJson(res.content);
 }

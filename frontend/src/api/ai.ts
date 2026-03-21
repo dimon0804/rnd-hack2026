@@ -28,7 +28,7 @@ export async function aiChat(
   prompt: string,
   systemPrompt: string,
   authFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>,
-  options?: { temperature?: number; maxTokens?: number },
+  options?: { temperature?: number; maxTokens?: number; stripMarkdown?: boolean },
 ): Promise<ChatResult> {
   const res = await authFetch(`${apiBase()}/api/v1/ai/chat`, {
     method: "POST",
@@ -42,7 +42,9 @@ export async function aiChat(
   });
   if (!res.ok) throw new Error(await parseError(res));
   const raw = (await res.json()) as ChatResult;
-  return { ...raw, content: stripAiMarkdown(raw.content) };
+  const content =
+    options?.stripMarkdown === false ? raw.content : stripAiMarkdown(raw.content);
+  return { ...raw, content };
 }
 
 export type ExtractTableResult = {

@@ -5,15 +5,19 @@ import { ragQuery } from "../../api/rag";
 import { documentStatusRu } from "../../lib/documentStatus";
 import {
   generateFlashcards,
+  generateInfographicSpec,
   generateMindmapText,
   generateOfficialReport,
   generatePresentationDeckJson,
   generateStructuredTableCsv,
   generateSummaryAndTopics,
+  generateVideoRecapPlan,
   runPodcastAction,
   runQuickAction,
+  type InfographicSpec,
   type PodcastPace,
   type PodcastTone,
+  type VideoRecapPlan,
 } from "../../lib/workspaceAi";
 import { layoutMindmap, parseMindmapText, type MindLayoutNode } from "../../lib/mindmapParse";
 import { prefetchVoices, speakPodcastScript, stopSpeaking } from "../../lib/speech";
@@ -21,6 +25,8 @@ import { humanizeChatError } from "../../lib/apiError";
 import { parseGammaDeckJson } from "../../lib/gammaDeck";
 import { buildGammaPptxBlob, triggerBlobDownload } from "../../lib/gammaDeckPptx";
 import { useAuth } from "../../context/AuthContext";
+import { fetchStockImageByQuery } from "../../lib/videoRecapMedia";
+import { InfographicChart } from "./InfographicChart";
 import { MindmapView } from "./MindmapView";
 import { ProcessingOverlay } from "./ProcessingOverlay";
 import { SttChatToolbar } from "../SttChatToolbar";
@@ -35,6 +41,8 @@ type Tab =
   | "tests"
   | "flashcards"
   | "presentation"
+  | "video"
+  | "infographic"
   | "mindmap";
 
 type Msg = { role: "user" | "assistant"; content: string };
@@ -79,6 +87,13 @@ export function DocumentWorkspace({ document }: Props) {
   const [tableLoading, setTableLoading] = useState(false);
   const [tableErr, setTableErr] = useState<string | null>(null);
   const [sttBusy, setSttBusy] = useState(false);
+  const [videoPlan, setVideoPlan] = useState<VideoRecapPlan | null>(null);
+  const [videoLoading, setVideoLoading] = useState(false);
+  const [videoErr, setVideoErr] = useState<string | null>(null);
+  const [videoSceneImages, setVideoSceneImages] = useState<Record<number, string>>({});
+  const [infographic, setInfographic] = useState<InfographicSpec | null>(null);
+  const [infographicLoading, setInfographicLoading] = useState(false);
+  const [infographicErr, setInfographicErr] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const st = document.status.trim().toLowerCase();
@@ -112,6 +127,27 @@ export function DocumentWorkspace({ document }: Props) {
       cancelled = true;
     };
   }, [ragIds, ready, authFetch]);
+
+  useEffect(() => {
+    if (!videoPlan) {
+      setVideoSceneImages({});
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const next: Record<number, string> = {};
+      for (let i = 0; i < videoPlan.scenes.length; i++) {
+        const sc = videoPlan.scenes[i];
+        const url = await fetchStockImageByQuery(authFetch, sc.image_hint_en, sc.scene_index);
+        if (cancelled) return;
+        if (url) next[sc.scene_index] = url;
+      }
+      if (!cancelled) setVideoSceneImages(next);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [videoPlan, authFetch]);
 
   const sendChat = async () => {
     const text = chatInput.trim();
@@ -273,6 +309,61 @@ export function DocumentWorkspace({ document }: Props) {
     URL.revokeObjectURL(url);
   };
 
+  const onVideoRecap = async () => {
+    if (!ready) return;
+    setVideoLoading(true);
+    setVideoErr(null);
+    setVideoPlan(null);
+    try {
+      const plan = await generateVideoRecapPlan(ragIds, authFetch);
+      setVideoPlan(plan);
+    } catch (e) {
+      setVideoErr(humanizeChatError(e instanceof Error ? e.message : "Ошибка"));
+    } finally {
+      setVideoLoading(false);
+    }
+  };
+
+  const downloadVideoScript = () => {
+    if (!videoPlan) return;
+    const text = buildVideoScriptText(videoPlan);
+    const base = document.original_filename.replace(/\.[^.]+$/, "") || "document";
+    const blob = new Blob([`\ufeff${text}`], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = window.document.createElement("a");
+    a.href = url;
+    a.download = `${base}-video-script.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const onInfographic = async () => {
+    if (!ready) return;
+    setInfographicLoading(true);
+    setInfographicErr(null);
+    setInfographic(null);
+    try {
+      const spec = await generateInfographicSpec(ragIds, authFetch);
+      setInfographic(spec);
+    } catch (e) {
+      setInfographicErr(humanizeChatError(e instanceof Error ? e.message : "Ошибка"));
+    } finally {
+      setInfographicLoading(false);
+    }
+  };
+
+  const downloadInfographicJson = () => {
+    if (!infographic) return;
+    const base = document.original_filename.replace(/\.[^.]+$/, "") || "document";
+    const blob = new Blob([JSON.stringify(infographic, null, 2)], { type: "application/json;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = window.document.createElement("a");
+    a.href = url;
+    a.download = `${base}-infographic.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const onGenerateTests = async () => {
     if (!ready) return;
     setTestsText(null);
@@ -369,6 +460,8 @@ export function DocumentWorkspace({ document }: Props) {
                 ["tests", "Тесты"],
                 ["flashcards", "Карточки"],
                 ["presentation", "Презентация"],
+                ["video", "Видео"],
+                ["infographic", "Инфографика"],
                 ["mindmap", "Mindmap"],
               ] as const
             ).map(([id, label]) => (
@@ -625,17 +718,17 @@ export function DocumentWorkspace({ document }: Props) {
           ) : null}
 
           {tab === "presentation" ? (
-            <div style={styles.panel}>
+            <div className="tab-panel">
               <p style={styles.muted}>
                 По тексту из RAG собирается файл <strong>.pptx</strong> (PowerPoint / Google Slides / LibreOffice) в духе
                 Gamma: тёмный фон, акцентная полоса, крупные заголовки. После генерации файл{" "}
                 <strong>скачивается автоматически</strong>.
               </p>
               <div style={styles.rowBetween}>
-                <h3 style={styles.panelTitle}>Презентация</h3>
+                <h3 className="tab-title">Презентация</h3>
                 <button
                   type="button"
-                  style={styles.genBtn}
+                  className="btn-solid"
                   disabled={!ready || presentationLoading}
                   onClick={() => void buildPresentation()}
                 >
@@ -655,13 +748,151 @@ export function DocumentWorkspace({ document }: Props) {
                     PowerPoint или загрузите в Google Презентации.
                   </div>
                   <div style={styles.tableActions}>
-                    <button type="button" style={styles.genBtn} onClick={() => downloadPresentationAgain()}>
+                    <button type="button" className="btn-solid" onClick={() => downloadPresentationAgain()}>
                       Скачать снова (.pptx)
                     </button>
                   </div>
                 </>
               ) : !presentationLoading && !presentationErr ? (
                 <p style={styles.muted}>Нажмите «Создать и скачать» — браузер предложит файл презентации.</p>
+              ) : null}
+            </div>
+          ) : null}
+
+          {tab === "video" ? (
+            <div className="tab-panel">
+              <p style={styles.muted}>
+                Сценарий «как видео»: для каждой сцены — <strong>кадр</strong> (подбор по запросу к стоку) и{" "}
+                <strong>текст озвучки</strong>. Это единый пакет для монтажа; готовый MP4 здесь не собирается — скачайте
+                сценарий с таймингами и изображения из превью.
+              </p>
+              <div style={styles.rowBetween}>
+                <h3 className="tab-title">Видео-пересказ</h3>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                  <button
+                    type="button"
+                    className="btn-solid"
+                    disabled={!ready || videoLoading}
+                    onClick={() => void onVideoRecap()}
+                  >
+                    {videoLoading ? "…" : "Сгенерировать план"}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-outline"
+                    disabled={!videoPlan}
+                    onClick={() => downloadVideoScript()}
+                  >
+                    Скачать сценарий (.txt)
+                  </button>
+                </div>
+              </div>
+              {videoLoading ? <p style={styles.muted}>Строим сцены и озвучку по RAG…</p> : null}
+              {videoErr ? (
+                <p style={styles.tableErr} role="alert">
+                  {videoErr}
+                </p>
+              ) : null}
+              {videoPlan ? (
+                <>
+                  <p style={{ ...styles.muted, marginTop: 10 }}>
+                    <strong>{videoPlan.video_title}</strong> · ориентир{" "}
+                    <strong>{videoPlan.total_duration_sec}</strong> с · сцен: {videoPlan.scenes.length}
+                  </p>
+                  {videoPlan.narrator_note_ru ? (
+                    <p style={styles.bodyText}>
+                      <span style={styles.muted}>Диктору: </span>
+                      {videoPlan.narrator_note_ru}
+                    </p>
+                  ) : null}
+                  <div className="video-scene-grid">
+                    {videoPlan.scenes.map((sc) => (
+                      <div key={sc.scene_index} className="video-scene-card">
+                        <div className="video-scene-thumb">
+                          {videoSceneImages[sc.scene_index] ? (
+                            <img src={videoSceneImages[sc.scene_index]} alt="" />
+                          ) : (
+                            <span style={styles.muted}>Загрузка кадра…</span>
+                          )}
+                        </div>
+                        <div className="video-scene-body">
+                          <div className="video-scene-meta">
+                            Сцена {sc.scene_index} · {sc.duration_sec} с · кадр: {sc.image_hint_en}
+                          </div>
+                          <h4 className="video-scene-title">{sc.title_ru}</h4>
+                          <p className="video-scene-voice">{sc.voiceover_ru}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              ) : !videoLoading && !videoErr ? (
+                <p style={styles.muted}>Нажмите «Сгенерировать план» — появятся сцены с превью кадров.</p>
+              ) : null}
+            </div>
+          ) : null}
+
+          {tab === "infographic" ? (
+            <div className="tab-panel">
+              <p style={styles.muted}>
+                Числа и показатели из текста в индексе RAG собираются в один график (столбики, горизонтальные полосы или
+                кольцо). При необходимости скачайте JSON для внешней визуализации.
+              </p>
+              <div style={styles.rowBetween}>
+                <h3 className="tab-title">Инфографика</h3>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                  <button
+                    type="button"
+                    className="btn-solid"
+                    disabled={!ready || infographicLoading}
+                    onClick={() => void onInfographic()}
+                  >
+                    {infographicLoading ? "…" : "Построить по данным"}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-outline"
+                    disabled={!infographic}
+                    onClick={() => downloadInfographicJson()}
+                  >
+                    Скачать JSON
+                  </button>
+                </div>
+              </div>
+              {infographicLoading ? <p style={styles.muted}>Извлекаем метрики и тип графика…</p> : null}
+              {infographicErr ? (
+                <p style={styles.tableErr} role="alert">
+                  {infographicErr}
+                </p>
+              ) : null}
+              {infographic ? (
+                <>
+                  <h4 className="tab-title" style={{ marginTop: 12, fontSize: "1.05rem" }}>
+                    {infographic.title}
+                  </h4>
+                  {infographic.subtitle ? <p style={styles.muted}>{infographic.subtitle}</p> : null}
+                  <InfographicChart spec={infographic} />
+                  {infographic.items.some((it) => it.source_hint) ? (
+                    <details style={{ marginTop: 12 }}>
+                      <summary style={styles.muted}>Подписи к источникам</summary>
+                      <ul style={{ ...styles.srcOl, marginTop: 8 }}>
+                        {infographic.items.map(
+                          (it, i) =>
+                            it.source_hint ? (
+                              <li key={i}>
+                                <strong>{it.label}:</strong> {it.source_hint}
+                              </li>
+                            ) : null,
+                        )}
+                      </ul>
+                    </details>
+                  ) : null}
+                  {infographic.footnote_ru ? (
+                    <p style={{ ...styles.muted, marginTop: 10 }}>{infographic.footnote_ru}</p>
+                  ) : null}
+                </>
+              ) : !infographicLoading && !infographicErr ? (
+                <p style={styles.muted}>Нажмите «Построить по данным» — здесь появится диаграмма.</p>
               ) : null}
             </div>
           ) : null}
@@ -776,6 +1007,28 @@ export function DocumentWorkspace({ document }: Props) {
             <button
               type="button"
               style={styles.quickBtn}
+              disabled={!ready || videoLoading}
+              onClick={() => {
+                setTab("video");
+                void onVideoRecap();
+              }}
+            >
+              {videoLoading ? "Видео-план…" : "Видео (сцены + озвучка)"}
+            </button>
+            <button
+              type="button"
+              style={styles.quickBtn}
+              disabled={!ready || infographicLoading}
+              onClick={() => {
+                setTab("infographic");
+                void onInfographic();
+              }}
+            >
+              {infographicLoading ? "Инфографика…" : "Инфографика (график)"}
+            </button>
+            <button
+              type="button"
+              style={styles.quickBtn}
               disabled={!ready || mindmapLoading}
               onClick={() => {
                 setTab("mindmap");
@@ -790,6 +1043,27 @@ export function DocumentWorkspace({ document }: Props) {
       </main>
     </>
   );
+}
+
+function buildVideoScriptText(plan: VideoRecapPlan): string {
+  const lines: string[] = [];
+  lines.push(`# ${plan.video_title}`);
+  lines.push(`Общая длительность (ориентир): ${plan.total_duration_sec} с`);
+  if (plan.narrator_note_ru) {
+    lines.push("");
+    lines.push("Заметка диктору:");
+    lines.push(plan.narrator_note_ru);
+  }
+  for (const s of plan.scenes) {
+    lines.push("");
+    lines.push(`--- Сцена ${s.scene_index}: ${s.title_ru} (${s.duration_sec} с) ---`);
+    lines.push("");
+    lines.push("Озвучка:");
+    lines.push(s.voiceover_ru);
+    lines.push("");
+    lines.push(`Кадр (запрос к стоку, EN): ${s.image_hint_en}`);
+  }
+  return lines.join("\n");
 }
 
 function FlashCard({ q, a }: { q: string; a: string }) {
