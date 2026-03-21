@@ -160,13 +160,15 @@ export function DocumentWorkspace({ document }: Props) {
     try {
       const chunks = await ragQuery(text, authFetch, 6, ragIds);
       const ctx = chunks.map((c) => c.text).join("\n\n").slice(0, 12000);
+      /** В подсказках к источникам — один самый релевантный чанк (RAG уже отсортирован по score). */
+      const sourceChunksForUi = chunks.length > 0 ? [chunks[0]] : [];
       const scope =
         ragIds.length > 1
           ? "загруженным связанным документам (одна тема)"
           : "этому документу";
       const system = `Помощник по материалам пользователя (${scope}). Отвечай на русском только по приведённому контексту. Если в контексте нет ответа — скажи об этом. Пиши обычным текстом, без markdown (#, **, обратные кавычки).\n\nКонтекст:\n${ctx || "(пусто)"}`;
       const reply = await aiChat(text, system, authFetch, { maxTokens: 1200 });
-      setMessages((m) => [...m, { role: "assistant", content: reply.content, sourceChunks: chunks }]);
+      setMessages((m) => [...m, { role: "assistant", content: reply.content, sourceChunks: sourceChunksForUi }]);
     } catch (e) {
       const raw = e instanceof Error ? e.message : "Ошибка";
       setMessages((m) => [...m, { role: "assistant", content: humanizeChatError(raw) }]);
@@ -617,8 +619,9 @@ export function DocumentWorkspace({ document }: Props) {
           {tab === "chat" ? (
             <div className="tab-panel tab-panel--chat">
               <p className="chat-hint">
-                Вопросы только по этому файлу. Под каждым ответом — цитаты из индекса (чанк, релевантность, фрагмент). 🎤 —
-                загрузить аудио, 🎙️ — голосовое в текст (STT через <code style={styles.codeSm}>STT_BASE_URL</code>, для
+                Вопросы только по этому файлу. Под ответом — один фрагмент индекса, наиболее близкий к вопросу (чанк,
+                релевантность, текст). 🎤 — загрузить аудио, 🎙️ — голосовое в текст (STT через{" "}
+                <code style={styles.codeSm}>STT_BASE_URL</code>, для
                 хакатона часто порт <strong>6640</strong>).
               </p>
               <div className="chat-scroll">
@@ -1036,7 +1039,7 @@ export function DocumentWorkspace({ document }: Props) {
 function ChatSourceCitations({ chunks }: { chunks: RagChunk[] }) {
   return (
     <div className="chat-cites" role="group" aria-label="Источники по индексу RAG">
-      <div className="chat-cites__label">Источники</div>
+      <div className="chat-cites__label">{chunks.length === 1 ? "Источник" : "Источники"}</div>
       <ul className="chat-cites__list">
         {chunks.map((c, idx) => {
           const key = `${c.document_id}-${c.chunk_id}-${idx}`;
