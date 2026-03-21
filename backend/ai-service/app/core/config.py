@@ -18,6 +18,13 @@ class Settings(BaseSettings):
     mistral_chat_model: str = Field(default="mistral-small-latest", alias="MISTRAL_CHAT_MODEL")
     request_timeout_seconds: float = Field(default=120.0, alias="AI_REQUEST_TIMEOUT_SECONDS")
 
+    # STT (OpenAI-совместимый POST /v1/audio/transcriptions), напр. hackai…:6640
+    stt_base_url: str | None = Field(default=None, alias="STT_BASE_URL")
+    stt_api_key: str = Field(default="", alias="STT_API_KEY")
+    stt_model: str | None = Field(default=None, alias="STT_MODEL")
+    stt_timeout_seconds: float = Field(default=180.0, alias="STT_TIMEOUT_SECONDS")
+    stt_max_upload_mb: int = Field(default=25, ge=1, le=100, alias="STT_MAX_UPLOAD_MB")
+
 
 @lru_cache
 def get_settings() -> Settings:

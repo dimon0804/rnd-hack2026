@@ -134,6 +134,10 @@ services:
       MISTRAL_BASE_URL: ${MISTRAL_BASE_URL:-https://api.mistral.ai}
       MISTRAL_CHAT_MODEL: ${MISTRAL_CHAT_MODEL:-mistral-small-latest}
       AI_REQUEST_TIMEOUT_SECONDS: ${AI_REQUEST_TIMEOUT_SECONDS:-120}
+      STT_BASE_URL: ${STT_BASE_URL:-}
+      STT_API_KEY: ${STT_API_KEY:-}
+      STT_MODEL: ${STT_MODEL:-}
+      STT_TIMEOUT_SECONDS: ${STT_TIMEOUT_SECONDS:-180}
 
   api-gateway:
     build:

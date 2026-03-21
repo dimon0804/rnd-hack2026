@@ -9,6 +9,7 @@ _ALLOWED_MIME = frozenset(
     {
         "application/pdf",
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
         "text/plain",
     }
 )

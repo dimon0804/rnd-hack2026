@@ -1,4 +1,5 @@
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -28,6 +29,9 @@ class Settings(BaseSettings):
     embedder_model: str | None = Field(default=None, alias="EMBEDDER_MODEL")
     embedder_batch_size: int = Field(default=32, ge=1, le=256, alias="EMBEDDER_BATCH_SIZE")
     embedder_timeout_seconds: float = Field(default=120.0, alias="EMBEDDER_TIMEOUT_SECONDS")
+
+    # Чанкинг: langchain (RecursiveCharacterTextSplitter), llama_index (SentenceSplitter), legacy (старое скользящее окно)
+    rag_chunker: Literal["langchain", "llama_index", "legacy"] = Field(default="langchain", alias="RAG_CHUNKER")
 
 
 @lru_cache

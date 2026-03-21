@@ -2,6 +2,10 @@
 
 Индексация и retrieval для RAG: **ingest** от document-service + поиск в памяти.
 
+**Форматы файлов при ingest:** PDF (`pypdf`), DOCX (`python-docx`), **PPTX** (`python-pptx` — текст слайдов и ячеек таблиц), TXT.
+
+**Чанкинг:** переменная **`RAG_CHUNKER`**: `langchain` (по умолчанию, `RecursiveCharacterTextSplitter` из **langchain-text-splitters**), `llama_index` (**LlamaIndex** `SentenceSplitter`), `legacy` (прежнее скользящее окно по символам).
+
 - **По умолчанию** — **TF-IDF** (scikit-learn).
 - Если задан **`EMBEDDER_BASE_URL`** — запросы к OpenAI-совместимому **`POST /v1/embeddings`** (vLLM и т.п., напр. порт **6620**), релевантность — косинусное сходство по эмбеддингам чанков и запроса.
 
