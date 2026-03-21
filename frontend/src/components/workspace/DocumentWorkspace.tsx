@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import type { DocumentItem } from "../../api/documents";
 import { aiChat } from "../../api/ai";
-import { ragQuery } from "../../api/rag";
+import { ragQuery, type RagChunk } from "../../api/rag";
 import { documentStatusRu } from "../../lib/documentStatus";
 import {
   generateFlashcards,
@@ -45,7 +45,12 @@ type Tab =
   | "infographic"
   | "mindmap";
 
-type Msg = { role: "user" | "assistant"; content: string };
+type Msg = {
+  role: "user" | "assistant";
+  content: string;
+  /** Чанки RAG, по которым строился ответ (только для assistant после успешного запроса). */
+  sourceChunks?: RagChunk[];
+};
 
 type Props = {
   document: DocumentItem;
@@ -60,9 +65,6 @@ export function DocumentWorkspace({ document }: Props) {
   const [messages, setMessages] = useState<Msg[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [chatBusy, setChatBusy] = useState(false);
-  const [lastChunks, setLastChunks] = useState<{ document_id: string; chunk_id: number; score: number; text: string }[]>(
-    [],
-  );
   const [testsText, setTestsText] = useState<string | null>(null);
   const [cards, setCards] = useState<{ q: string; a: string }[]>([]);
   const [cardsLoading, setCardsLoading] = useState(false);
@@ -157,7 +159,6 @@ export function DocumentWorkspace({ document }: Props) {
     setChatBusy(true);
     try {
       const chunks = await ragQuery(text, authFetch, 6, ragIds);
-      setLastChunks(chunks);
       const ctx = chunks.map((c) => c.text).join("\n\n").slice(0, 12000);
       const scope =
         ragIds.length > 1
@@ -165,7 +166,7 @@ export function DocumentWorkspace({ document }: Props) {
           : "этому документу";
       const system = `Помощник по материалам пользователя (${scope}). Отвечай на русском только по приведённому контексту. Если в контексте нет ответа — скажи об этом. Пиши обычным текстом, без markdown (#, **, обратные кавычки).\n\nКонтекст:\n${ctx || "(пусто)"}`;
       const reply = await aiChat(text, system, authFetch, { maxTokens: 1200 });
-      setMessages((m) => [...m, { role: "assistant", content: reply.content }]);
+      setMessages((m) => [...m, { role: "assistant", content: reply.content, sourceChunks: chunks }]);
     } catch (e) {
       const raw = e instanceof Error ? e.message : "Ошибка";
       setMessages((m) => [...m, { role: "assistant", content: humanizeChatError(raw) }]);
@@ -616,9 +617,9 @@ export function DocumentWorkspace({ document }: Props) {
           {tab === "chat" ? (
             <div className="tab-panel tab-panel--chat">
               <p className="chat-hint">
-                Вопросы только по этому файлу. Источники — внизу после ответа. 🎤 — загрузить аудио, 🎙️ — голосовое в
-                текст (STT через <code style={styles.codeSm}>STT_BASE_URL</code>, для хакатона часто порт{" "}
-                <strong>6640</strong>).
+                Вопросы только по этому файлу. Под каждым ответом — цитаты из индекса (чанк, релевантность, фрагмент). 🎤 —
+                загрузить аудио, 🎙️ — голосовое в текст (STT через <code style={styles.codeSm}>STT_BASE_URL</code>, для
+                хакатона часто порт <strong>6640</strong>).
               </p>
               <div className="chat-scroll">
                 <div className="chat-thread">
@@ -629,23 +630,14 @@ export function DocumentWorkspace({ document }: Props) {
                     >
                       <span className="chat-label">{msg.role === "user" ? "Вы" : "Ответ"}</span>
                       <p>{msg.content}</p>
+                      {msg.role === "assistant" && msg.sourceChunks && msg.sourceChunks.length > 0 ? (
+                        <ChatSourceCitations chunks={msg.sourceChunks} />
+                      ) : null}
                     </div>
                   ))}
                   {chatBusy ? <p style={styles.muted}>Ищем в документе…</p> : null}
                   <div ref={bottomRef} />
                 </div>
-                {lastChunks.length > 0 ? (
-                  <details className="chat-sources" style={styles.sources}>
-                    <summary>Источники ({lastChunks.length} фрагментов)</summary>
-                    <ol style={styles.srcOl}>
-                      {lastChunks.map((c, i) => (
-                        <li key={`${c.chunk_id}-${i}`}>
-                          <span style={styles.srcMeta}>{(c.score * 100).toFixed(0)}%</span> {c.text.slice(0, 280)}…
-                        </li>
-                      ))}
-                    </ol>
-                  </details>
-                ) : null}
               </div>
               <div className="chat-composer">
                 <SttChatToolbar
@@ -1038,6 +1030,43 @@ export function DocumentWorkspace({ document }: Props) {
       </div>
       </main>
     </>
+  );
+}
+
+function ChatSourceCitations({ chunks }: { chunks: RagChunk[] }) {
+  return (
+    <div className="chat-cites" role="group" aria-label="Источники по индексу RAG">
+      <div className="chat-cites__label">Источники</div>
+      <ul className="chat-cites__list">
+        {chunks.map((c, idx) => {
+          const key = `${c.document_id}-${c.chunk_id}-${idx}`;
+          const peek = c.text.replace(/\s+/g, " ").trim();
+          const peekShort = peek.length > 100 ? `${peek.slice(0, 100)}…` : peek;
+          return (
+            <li key={key}>
+              <details className="chat-cite">
+                <summary className="chat-cite__summary">
+                  <span className="chat-cite__chip">Чанк #{c.chunk_id}</span>
+                  <span className="chat-cite__score" title="Релевантность (оценка поиска)">
+                    {Math.round(Math.min(1, Math.max(0, c.score)) * 100)}%
+                  </span>
+                  <span className="chat-cite__peek">{peekShort}</span>
+                </summary>
+                <div className="chat-cite__body">
+                  <p className="chat-cite__docid">
+                    <span className="muted">Документ</span>{" "}
+                    <code className="chat-cite__uuid" title={c.document_id}>
+                      {c.document_id.slice(0, 8)}…
+                    </code>
+                  </p>
+                  <p className="chat-cite__text">{c.text}</p>
+                </div>
+              </details>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
   );
 }
 
