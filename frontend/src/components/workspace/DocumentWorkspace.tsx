@@ -263,17 +263,17 @@ export function DocumentWorkspace({ document }: Props) {
   return (
     <>
       <ProcessingOverlay active={processing} />
-      <div style={styles.page}>
+      <main className="main main--workspace" id="main" tabIndex={-1}>
         {failed ? (
-          <div style={styles.failBanner}>
+          <div className="callout callout--danger" style={{ marginBottom: "1rem" }}>
             <strong>Не удалось обработать документ.</strong>
             {document.status_message ? ` ${document.status_message}` : " Попробуйте загрузить файл снова."}
           </div>
         ) : null}
-        <div className="workspace-grid">
-        <aside style={styles.left}>
-          <p style={styles.sideKicker}>Документ</p>
-          <h2 style={styles.docTitle}>{document.original_filename}</h2>
+        <div className="workspace-layout">
+        <aside className="workspace-sidebar">
+          <p className="sidebar-heading">Документ</p>
+          <h2 className="workspace-file-title">{document.original_filename}</h2>
           {ragIds.length > 1 ? (
             <p style={styles.groupBanner}>
               Чат и инструменты учитывают <strong>{ragIds.length} файлов</strong> в одной тематической группе (общий поиск
@@ -291,7 +291,7 @@ export function DocumentWorkspace({ document }: Props) {
             {loadingInsights ? (
               <p style={styles.muted}>Готовим обзор…</p>
             ) : topics.length ? (
-              <ul style={styles.topicList}>
+              <ul className="topic-list">
                 {topics.map((t, i) => (
                   <li key={i}>{t}</li>
                 ))}
@@ -313,8 +313,8 @@ export function DocumentWorkspace({ document }: Props) {
           </button>
         </aside>
 
-        <main style={styles.main}>
-          <div style={styles.tabs}>
+        <div className="workspace-center">
+          <div className="tab-bar" role="tablist">
             {(
               [
                 ["summary", "Обзор"],
@@ -331,7 +331,7 @@ export function DocumentWorkspace({ document }: Props) {
               <button
                 key={id}
                 type="button"
-                style={{ ...styles.tab, ...(tab === id ? styles.tabOn : {}) }}
+                className={`tab-btn${tab === id ? " is-active" : ""}`}
                 onClick={() => setTab(id)}
               >
                 {label}
@@ -340,8 +340,8 @@ export function DocumentWorkspace({ document }: Props) {
           </div>
 
           {tab === "summary" ? (
-            <div style={styles.panel}>
-              <h3 style={styles.panelTitle}>Краткое содержание</h3>
+            <div className="tab-panel">
+              <h3 className="tab-title">Краткое содержание</h3>
               {loadingInsights ? (
                 <p style={styles.muted}>Анализируем документ и формируем описание…</p>
               ) : (
@@ -351,16 +351,16 @@ export function DocumentWorkspace({ document }: Props) {
           ) : null}
 
           {tab === "simple" ? (
-            <div style={styles.panel}>
+            <div className="tab-panel">
               <p style={styles.muted}>
                 Объяснение «как для человека»: без лишних терминов, на всю ширину окна. Нажмите «Сгенерировать», когда
                 будете готовы.
               </p>
               <div style={styles.rowBetween}>
-                <h3 style={styles.panelTitle}>Простыми словами</h3>
+                <h3 className="tab-title">Простыми словами</h3>
                 <button
                   type="button"
-                  style={styles.genBtn}
+                  className="btn-solid"
                   disabled={!ready || easyLoading === "simple"}
                   onClick={() => void genEasySimple()}
                 >
@@ -375,16 +375,16 @@ export function DocumentWorkspace({ document }: Props) {
           ) : null}
 
           {tab === "short" ? (
-            <div style={styles.panel}>
+            <div className="tab-panel">
               <p style={styles.muted}>
                 Отдельно от вкладки «Обзор»: здесь вы сами запускаете короткий пересказ в 3–5 предложениях по запросу к
                 модели.
               </p>
               <div style={styles.rowBetween}>
-                <h3 style={styles.panelTitle}>Краткий пересказ</h3>
+                <h3 className="tab-title">Краткий пересказ</h3>
                 <button
                   type="button"
-                  style={styles.genBtn}
+                  className="btn-solid"
                   disabled={!ready || easyLoading === "short"}
                   onClick={() => void genEasyShort()}
                 >
@@ -398,12 +398,12 @@ export function DocumentWorkspace({ document }: Props) {
           ) : null}
 
           {tab === "report" ? (
-            <div style={styles.panel}>
+            <div className="tab-panel">
               <div style={styles.rowBetween}>
-                <h3 style={styles.panelTitle}>Формализованный отчёт</h3>
+                <h3 className="tab-title">Формализованный отчёт</h3>
                 <button
                   type="button"
-                  style={styles.genBtn}
+                  className="btn-solid"
                   disabled={!ready || reportLoading}
                   onClick={() => void onOfficialReport()}
                 >
@@ -418,7 +418,7 @@ export function DocumentWorkspace({ document }: Props) {
           ) : null}
 
           {tab === "table" ? (
-            <div style={styles.panel}>
+            <div className="tab-panel">
               <p style={styles.muted}>
                 По тексту из индекса RAG модель собирает одну таблицу в формате CSV (разделитель — запятая). Файл можно
                 открыть в Excel или Google Таблицах. При необходимости уточните, какие сущности или столбцы важнее.
@@ -427,7 +427,7 @@ export function DocumentWorkspace({ document }: Props) {
                 Уточнение для таблицы (необязательно)
                 <input
                   type="text"
-                  style={styles.inputTable}
+                  className="input-bordered"
                   placeholder="Например: только сроки и ответственные"
                   value={tableFocus}
                   disabled={!ready || tableLoading}
@@ -435,8 +435,8 @@ export function DocumentWorkspace({ document }: Props) {
                 />
               </label>
               <div style={styles.rowBetween}>
-                <h3 style={styles.panelTitle}>Структурированные данные</h3>
-                <button type="button" style={styles.genBtn} disabled={!ready || tableLoading} onClick={() => void onExtractTable()}>
+                <h3 className="tab-title">Структурированные данные</h3>
+                <button type="button" className="btn-solid" disabled={!ready || tableLoading} onClick={() => void onExtractTable()}>
                   {tableLoading ? "…" : "Сформировать CSV"}
                 </button>
               </div>
@@ -460,10 +460,8 @@ export function DocumentWorkspace({ document }: Props) {
                   <div style={styles.tableActions}>
                     <button
                       type="button"
-                      style={{
-                        ...styles.genBtn,
-                        ...(tableCsv === "" ? styles.tableBtnDisabled : {}),
-                      }}
+                      className="btn-solid"
+                      style={tableCsv === "" ? { opacity: 0.45, cursor: "not-allowed" } : undefined}
                       disabled={tableCsv === ""}
                       onClick={() => downloadTableCsv()}
                     >
@@ -479,24 +477,23 @@ export function DocumentWorkspace({ document }: Props) {
           ) : null}
 
           {tab === "chat" ? (
-            <div style={styles.panelChat}>
+            <div
+              className="tab-panel"
+              style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 360 }}
+            >
               <p style={styles.chatHint}>
                 Вопросы только по этому файлу. Источники — внизу после ответа. 🎤 — загрузить аудио, 🎙️ — голосовое в
                 текст (STT через <code style={styles.codeSm}>STT_BASE_URL</code>, для хакатона часто порт{" "}
                 <strong>6640</strong>).
               </p>
-              <div style={styles.chatThread}>
+              <div className="chat-thread" style={{ maxHeight: 360 }}>
                 {messages.map((msg, i) => (
-                  <div key={i} style={{ ...styles.chatRow, ...(msg.role === "user" ? styles.chatUser : {}) }}>
-                    <span style={styles.chatWho}>{msg.role === "user" ? "Вы" : "Ответ"}</span>
-                    <div
-                      style={{
-                        ...styles.chatBubble,
-                        ...(msg.role === "user" ? styles.chatBubbleUser : {}),
-                      }}
-                    >
-                      {msg.content}
-                    </div>
+                  <div
+                    key={i}
+                    className={`chat-bubble${msg.role === "user" ? " chat-bubble--user" : " chat-bubble--bot"}`}
+                  >
+                    <span className="chat-label">{msg.role === "user" ? "Вы" : "Ответ"}</span>
+                    <p>{msg.content}</p>
                   </div>
                 ))}
                 {chatBusy ? <p style={styles.muted}>Ищем в документе…</p> : null}
@@ -514,7 +511,10 @@ export function DocumentWorkspace({ document }: Props) {
                   </ol>
                 </details>
               ) : null}
-              <div style={styles.chatComposer}>
+              <div
+                className="composer"
+                style={{ marginTop: "auto", padding: "0.85rem 1.15rem 1.25rem", borderTop: "1px solid var(--border)" }}
+              >
                 <SttChatToolbar
                   authFetch={authFetch}
                   disabled={chatBusy || !ready}
@@ -527,7 +527,7 @@ export function DocumentWorkspace({ document }: Props) {
                   }
                 />
                 <textarea
-                  style={styles.textarea}
+                  className="composer-input"
                   rows={2}
                   placeholder="Например: объясни как школьнику…"
                   value={chatInput}
@@ -542,7 +542,7 @@ export function DocumentWorkspace({ document }: Props) {
                 />
                 <button
                   type="button"
-                  style={styles.sendBtn}
+                  className="btn-solid"
                   disabled={chatBusy || !ready || sttBusy}
                   onClick={() => void sendChat()}
                 >
@@ -553,10 +553,10 @@ export function DocumentWorkspace({ document }: Props) {
           ) : null}
 
           {tab === "tests" ? (
-            <div style={styles.panel}>
+            <div className="tab-panel">
               <div style={styles.rowBetween}>
-                <h3 style={styles.panelTitle}>Тесты</h3>
-                <button type="button" style={styles.genBtn} disabled={!ready} onClick={() => void onGenerateTests()}>
+                <h3 className="tab-title">Тесты</h3>
+                <button type="button" className="btn-solid" disabled={!ready} onClick={() => void onGenerateTests()}>
                   Создать тест
                 </button>
               </div>
@@ -565,14 +565,14 @@ export function DocumentWorkspace({ document }: Props) {
           ) : null}
 
           {tab === "flashcards" ? (
-            <div style={styles.panel}>
+            <div className="tab-panel">
               <div style={styles.rowBetween}>
-                <h3 style={styles.panelTitle}>Карточки</h3>
-                <button type="button" style={styles.genBtn} disabled={!ready || cardsLoading} onClick={() => void onFlashcards()}>
+                <h3 className="tab-title">Карточки</h3>
+                <button type="button" className="btn-solid" disabled={!ready || cardsLoading} onClick={() => void onFlashcards()}>
                   {cardsLoading ? "…" : "Сгенерировать"}
                 </button>
               </div>
-              <div style={styles.cardGrid}>
+              <div className="flash-grid">
                 {cards.map((c, i) => (
                   <FlashCard key={i} q={c.q} a={c.a} />
                 ))}
@@ -581,10 +581,10 @@ export function DocumentWorkspace({ document }: Props) {
           ) : null}
 
           {tab === "mindmap" ? (
-            <div style={styles.panel}>
+            <div className="tab-panel">
               <div style={styles.rowBetween}>
-                <h3 style={styles.panelTitle}>Интеллект-карта</h3>
-                <button type="button" style={styles.genBtn} disabled={!ready || mindmapLoading} onClick={() => void buildMindmap()}>
+                <h3 className="tab-title">Интеллект-карта</h3>
+                <button type="button" className="btn-solid" disabled={!ready || mindmapLoading} onClick={() => void buildMindmap()}>
                   {mindmapLoading ? "…" : "Перестроить"}
                 </button>
               </div>
@@ -613,10 +613,10 @@ export function DocumentWorkspace({ document }: Props) {
               ) : null}
             </div>
           ) : null}
-        </main>
+        </div>
 
-        <aside style={styles.right}>
-          <h3 style={styles.h3}>Быстрые действия</h3>
+        <aside className="workspace-aside">
+          <h3 className="aside-title">Быстрые действия</h3>
           <div style={styles.quickList}>
             <button type="button" style={styles.quickBtn} disabled={!ready} onClick={() => void onGenerateTests()}>
               Создать тест
@@ -626,7 +626,7 @@ export function DocumentWorkspace({ document }: Props) {
               <label style={styles.lbl}>
                 Тон
                 <select
-                  style={styles.sel}
+                  className="input-select"
                   value={podcastTone}
                   disabled={!ready || podcastLoading}
                   onChange={(e) => setPodcastTone(e.target.value as PodcastTone)}
@@ -638,7 +638,7 @@ export function DocumentWorkspace({ document }: Props) {
               <label style={styles.lbl}>
                 Темп речи
                 <select
-                  style={styles.sel}
+                  className="input-select"
                   value={podcastPace}
                   disabled={!ready || podcastLoading}
                   onChange={(e) => setPodcastPace(e.target.value as PodcastPace)}
@@ -690,7 +690,7 @@ export function DocumentWorkspace({ document }: Props) {
           </div>
         </aside>
       </div>
-    </div>
+      </main>
     </>
   );
 }
@@ -698,10 +698,16 @@ export function DocumentWorkspace({ document }: Props) {
 function FlashCard({ q, a }: { q: string; a: string }) {
   const [flipped, setFlipped] = useState(false);
   return (
-    <button type="button" style={styles.fc} onClick={() => setFlipped(!flipped)}>
-      <span style={styles.fcLabel}>{flipped ? "Ответ" : "Вопрос"}</span>
-      <p style={styles.fcText}>{flipped ? a : q}</p>
-      <span style={styles.fcTap}>Нажмите, чтобы перевернуть</span>
+    <button
+      type="button"
+      className={`flash-card${flipped ? " is-flipped" : ""}`}
+      onClick={() => setFlipped(!flipped)}
+    >
+      <span className="chat-label">{flipped ? "Ответ" : "Вопрос"}</span>
+      <span className="flash-face">{flipped ? a : q}</span>
+      <span className="muted small" style={{ display: "block", marginTop: 8 }}>
+        Нажмите, чтобы перевернуть
+      </span>
     </button>
   );
 }

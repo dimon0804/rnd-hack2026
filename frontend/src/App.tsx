@@ -1,8 +1,9 @@
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { Layout } from "./components/Layout";
 import { AuthPage } from "./pages/AuthPage";
 import { ChatPage } from "./pages/ChatPage";
 import { HomePage } from "./pages/HomePage";
+import { NotFoundPage } from "./pages/NotFoundPage";
 import { UploadPage } from "./pages/UploadPage";
 import { WorkspacePage } from "./pages/WorkspacePage";
 
@@ -17,7 +18,7 @@ export function App() {
           <Route path="/upload" element={<UploadPage />} />
           <Route path="/workspace/:documentId" element={<WorkspacePage />} />
           <Route path="/chat" element={<ChatPage />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
+          <Route path="*" element={<NotFoundPage />} />
         </Route>
       </Routes>
     </BrowserRouter>

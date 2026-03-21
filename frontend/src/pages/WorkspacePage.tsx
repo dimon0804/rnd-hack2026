@@ -36,9 +36,11 @@ export function WorkspacePage() {
 
   if (!isHydrated) {
     return (
-      <div style={{ padding: 48, textAlign: "center", color: "var(--muted)" }}>
-        Загрузка…
-      </div>
+      <main className="main main--wide" id="main" tabIndex={-1}>
+        <p className="panel-empty" style={{ padding: "3rem 1rem", textAlign: "center" }}>
+          Загрузка…
+        </p>
+      </main>
     );
   }
 
@@ -52,20 +54,25 @@ export function WorkspacePage() {
 
   if (error) {
     return (
-      <div style={{ maxWidth: 560, margin: "48px auto", padding: 24 }}>
-        <p style={{ color: "var(--danger)" }}>{error}</p>
-        <Link to="/upload" style={{ color: "var(--accent)" }}>
-          ← К загрузке
-        </Link>
-      </div>
+      <main className="main main--wide" id="main" tabIndex={-1}>
+        <div className="callout callout--danger" style={{ maxWidth: 560 }}>
+          <strong>Ошибка</strong>
+          <p style={{ margin: "0.5rem 0 0" }}>{error}</p>
+          <Link to="/upload" className="btn-back-link" style={{ marginTop: 12, display: "inline-block" }}>
+            ← К загрузке
+          </Link>
+        </div>
+      </main>
     );
   }
 
   if (!doc) {
     return (
-      <div style={{ padding: 48, textAlign: "center", color: "var(--muted)" }}>
-        Загрузка документа…
-      </div>
+      <main className="main main--wide" id="main" tabIndex={-1}>
+        <p className="panel-empty" style={{ padding: "3rem 1rem", textAlign: "center" }}>
+          Загрузка документа…
+        </p>
+      </main>
     );
   }
 

@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 
@@ -42,11 +42,11 @@ export function AuthForm({ initialMode, onSuccess }: Props) {
   };
 
   return (
-    <div style={styles.card}>
-      <div style={styles.tabs}>
+    <>
+      <div className="auth-tabs" role="tablist" aria-label="Режим">
         <Link
           to="/login"
-          style={{ ...styles.tab, ...(mode === "login" ? styles.tabActive : {}) }}
+          className={`auth-tab${mode === "login" ? " is-active" : ""}`}
           onClick={() => {
             setMode("login");
             setError(null);
@@ -56,7 +56,7 @@ export function AuthForm({ initialMode, onSuccess }: Props) {
         </Link>
         <Link
           to="/register"
-          style={{ ...styles.tab, ...(mode === "register" ? styles.tabActive : {}) }}
+          className={`auth-tab${mode === "register" ? " is-active" : ""}`}
           onClick={() => {
             setMode("register");
             setError(null);
@@ -65,94 +65,40 @@ export function AuthForm({ initialMode, onSuccess }: Props) {
           Регистрация
         </Link>
       </div>
-      <form onSubmit={(e) => void onSubmit(e)} style={styles.form}>
-        <label style={styles.label}>Email</label>
-        <input
-          style={styles.input}
-          type="email"
-          autoComplete="email"
-          value={formEmail}
-          onChange={(e) => setFormEmail(e.target.value)}
-          required
-        />
-        <label style={styles.label}>Пароль</label>
-        <input
-          style={styles.input}
-          type="password"
-          autoComplete={mode === "login" ? "current-password" : "new-password"}
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          required
-          minLength={mode === "register" ? 8 : 1}
-        />
-        {mode === "register" ? (
-          <p style={styles.hint}>Минимум 8 символов</p>
-        ) : null}
+      <form className="auth-form" onSubmit={(e) => void onSubmit(e)}>
+        <div className="field">
+          <label htmlFor="auth-email">Email</label>
+          <input
+            id="auth-email"
+            type="email"
+            autoComplete="email"
+            value={formEmail}
+            onChange={(e) => setFormEmail(e.target.value)}
+            required
+          />
+        </div>
+        <div className="field">
+          <label htmlFor="auth-password">Пароль</label>
+          <input
+            id="auth-password"
+            type="password"
+            autoComplete={mode === "login" ? "current-password" : "new-password"}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+            minLength={mode === "register" ? 8 : 1}
+          />
+        </div>
+        {mode === "register" ? <p className="field-hint">Минимум 8 символов</p> : null}
         {error ? (
-          <p style={styles.err} role="alert">
+          <p className="form-error" role="alert">
             {error}
           </p>
         ) : null}
-        <button type="submit" style={styles.btnPrimary} disabled={busy}>
+        <button type="submit" className="btn-solid btn-wide" disabled={busy}>
           {busy ? "…" : mode === "login" ? "Войти" : "Создать аккаунт"}
         </button>
       </form>
-    </div>
+    </>
   );
 }
-
-const styles: Record<string, CSSProperties> = {
-  card: {
-    width: "100%",
-    maxWidth: 400,
-    padding: 24,
-    borderRadius: "var(--radius)",
-    border: "1px solid var(--border)",
-    background: "var(--bg-elevated)",
-    boxShadow: "var(--shadow)",
-  },
-  tabs: { display: "flex", gap: 8, marginBottom: 20 },
-  tab: {
-    flex: 1,
-    padding: "10px 12px",
-    borderRadius: 10,
-    border: "1px solid var(--border)",
-    background: "transparent",
-    color: "var(--muted)",
-    cursor: "pointer",
-    fontWeight: 600,
-    fontSize: "0.9rem",
-    textAlign: "center",
-    textDecoration: "none",
-  },
-  tabActive: {
-    borderColor: "var(--accent)",
-    color: "var(--text)",
-    background: "var(--accent-dim)",
-  },
-  form: { display: "flex", flexDirection: "column", gap: 0 },
-  label: { display: "block", fontSize: "0.8rem", color: "var(--muted)", marginBottom: 6 },
-  input: {
-    width: "100%",
-    padding: "10px 12px",
-    borderRadius: 10,
-    border: "1px solid var(--border)",
-    background: "rgba(255,255,255,0.04)",
-    color: "var(--text)",
-    marginBottom: 12,
-    outline: "none",
-    boxSizing: "border-box",
-  },
-  hint: { margin: "-8px 0 4px", fontSize: "0.8rem", color: "var(--muted)" },
-  err: { color: "var(--danger)", margin: "4px 0 8px", fontSize: "0.88rem" },
-  btnPrimary: {
-    marginTop: 8,
-    padding: "12px 16px",
-    borderRadius: 10,
-    border: "none",
-    background: "var(--accent)",
-    color: "#0b1220",
-    fontWeight: 700,
-    cursor: "pointer",
-  },
-};

@@ -1,139 +1,63 @@
 import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-import type { CSSProperties } from "react";
+import { useTheme } from "../context/ThemeContext";
+import { truncateEmail } from "../lib/truncateEmail";
+import { MoonIcon, SunIcon } from "./ThemeIcons";
 
 export function AppHeader() {
   const { email, isAuthenticated, isHydrated, logout } = useAuth();
+  const { theme, toggleTheme } = useTheme();
 
   return (
-    <header style={styles.header}>
-      <div style={styles.inner}>
-        <Link to="/" style={styles.brand}>
-          <span style={styles.brandMark}>AI</span>
-          <span>Platform</span>
+    <header className="site-header">
+      <div className="header-inner">
+        <Link to="/" className="brand" aria-label="AI platform — на главную">
+          <span className="brand-glyph" aria-hidden>
+            <span className="brand-orbit" />
+            <span className="brand-dot" />
+          </span>
+          <span className="brand-lockup">
+            <span className="brand-ai">AI</span>
+            <span className="brand-platform">platform</span>
+          </span>
         </Link>
-        <nav style={styles.nav}>
-          {isHydrated && isAuthenticated ? (
-            <Link to="/upload" style={styles.navLink}>
-              Загрузка
-            </Link>
-          ) : null}
+        <nav className="nav" aria-label="Основная навигация">
           {!isHydrated ? (
-            <span style={styles.muted}>…</span>
+            <span className="header-placeholder" aria-hidden>
+              …
+            </span>
           ) : isAuthenticated ? (
-            <div style={styles.user}>
-              <span style={styles.email}>{email ?? "Аккаунт"}</span>
-              <button type="button" style={styles.btnGhost} onClick={logout}>
+            <>
+              <Link to="/upload" className="btn-text">
+                Загрузка
+              </Link>
+              <span className="header-email" title={email ?? undefined}>
+                {truncateEmail(email ?? "")}
+              </span>
+              <button type="button" className="btn-outline btn-compact" onClick={() => void logout()}>
                 Выйти
               </button>
-            </div>
+            </>
           ) : (
             <>
-              <Link to="/login" style={styles.btnGhost}>
+              <Link to="/login" className="btn-text">
                 Войти
               </Link>
-              <Link to="/register" style={styles.btnAccent}>
+              <Link to="/register" className="btn-outline btn-compact">
                 Регистрация
               </Link>
             </>
           )}
+          <button
+            type="button"
+            className="btn-ghost-round"
+            onClick={toggleTheme}
+            aria-label={theme === "light" ? "Включить тёмную тему" : "Включить светлую тему"}
+          >
+            {theme === "light" ? <MoonIcon /> : <SunIcon />}
+          </button>
         </nav>
       </div>
     </header>
   );
 }
-
-const styles: Record<string, CSSProperties> = {
-  header: {
-    position: "sticky",
-    top: 0,
-    zIndex: 10,
-    borderBottom: "1px solid var(--border)",
-    background: "rgba(15, 18, 25, 0.85)",
-    backdropFilter: "blur(12px)",
-  },
-  inner: {
-    maxWidth: 1040,
-    margin: "0 auto",
-    padding: "14px 20px",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 16,
-  },
-  brand: {
-    display: "flex",
-    alignItems: "center",
-    gap: 10,
-    fontWeight: 700,
-    fontSize: "1.05rem",
-    letterSpacing: "-0.02em",
-    color: "var(--text)",
-    textDecoration: "none",
-  },
-  brandMark: {
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    background: "var(--accent-dim)",
-    border: "1px solid rgba(110, 231, 183, 0.35)",
-    color: "var(--accent)",
-    fontSize: "0.85rem",
-  },
-  nav: {
-    display: "flex",
-    alignItems: "center",
-    gap: 10,
-    flexWrap: "wrap",
-    justifyContent: "flex-end",
-  },
-  navLink: {
-    color: "var(--muted)",
-    textDecoration: "none",
-    fontSize: "0.92rem",
-    fontWeight: 500,
-    padding: "6px 8px",
-    borderRadius: 8,
-  },
-  user: {
-    display: "flex",
-    alignItems: "center",
-    gap: 10,
-    flexWrap: "wrap",
-  },
-  email: {
-    fontSize: "0.88rem",
-    color: "var(--muted)",
-    maxWidth: 200,
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
-  },
-  muted: { color: "var(--muted)", fontSize: "0.9rem" },
-  btnGhost: {
-    padding: "8px 14px",
-    borderRadius: 10,
-    border: "1px solid var(--border)",
-    background: "transparent",
-    color: "var(--text)",
-    cursor: "pointer",
-    fontWeight: 600,
-    fontSize: "0.88rem",
-    textDecoration: "none",
-    display: "inline-block",
-  },
-  btnAccent: {
-    padding: "8px 14px",
-    borderRadius: 10,
-    border: "none",
-    background: "var(--accent)",
-    color: "#0b1220",
-    fontWeight: 700,
-    fontSize: "0.88rem",
-    textDecoration: "none",
-    display: "inline-block",
-  },
-};

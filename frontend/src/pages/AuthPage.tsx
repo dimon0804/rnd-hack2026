@@ -2,7 +2,6 @@ import { useEffect } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { AuthForm } from "../components/AuthForm";
 import { useAuth } from "../context/AuthContext";
-import type { CSSProperties } from "react";
 
 type Props = { mode: "login" | "register" };
 
@@ -28,38 +27,27 @@ export function AuthPage({ mode }: Props) {
       : "Создайте аккаунт — пароль не менее 8 символов.";
 
   return (
-    <div style={styles.wrap}>
-      <div style={styles.intro}>
-        <h1 style={styles.h1}>{title}</h1>
-        <p style={styles.sub}>{subtitle}</p>
+    <main className="main main--auth" id="main" tabIndex={-1}>
+      <div className="auth-grid">
+        <div className="auth-rail" aria-hidden>
+          <span className="auth-rail-line">доступ</span>
+          <span className="auth-rail-line auth-rail-line--accent">кабинет</span>
+        </div>
+        <div className="auth-stage">
+          <span className="auth-watermark" aria-hidden>
+            {mode === "login" ? "вход" : "новый"}
+          </span>
+          <div className="auth-card">
+            <p className="auth-meta">{mode === "login" ? "аккаунт" : "регистрация"}</p>
+            <h1 className="auth-title">{title}</h1>
+            <p className="auth-lede">{subtitle}</p>
+            <AuthForm key={mode} initialMode={mode} onSuccess={() => navigate(next, { replace: true })} />
+          </div>
+          <Link to="/" className="btn-back-link">
+            ← На главную
+          </Link>
+        </div>
       </div>
-      <AuthForm
-        key={mode}
-        initialMode={mode}
-        onSuccess={() => navigate(next, { replace: true })}
-      />
-      <p style={styles.footer}>
-        <Link to="/" style={styles.link}>
-          ← На главную
-        </Link>
-      </p>
-    </div>
+    </main>
   );
 }
-
-const styles: Record<string, CSSProperties> = {
-  wrap: {
-    maxWidth: 440,
-    margin: "0 auto",
-    padding: "32px 20px 64px",
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "stretch",
-    gap: 24,
-  },
-  intro: { textAlign: "center" },
-  h1: { margin: "0 0 8px", fontSize: "1.55rem", fontWeight: 700, letterSpacing: "-0.02em" },
-  sub: { margin: 0, color: "var(--muted)", fontSize: "0.95rem", lineHeight: 1.55 },
-  footer: { margin: 0, textAlign: "center" },
-  link: { color: "var(--muted)", fontSize: "0.9rem", textDecoration: "underline" },
-};
