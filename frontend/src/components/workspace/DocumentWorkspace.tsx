@@ -1,12 +1,14 @@
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type ChangeEvent, type CSSProperties } from "react";
 import type { DocumentItem } from "../../api/documents";
 import { aiChat } from "../../api/ai";
+import { transcribeAudio } from "../../api/transcribe";
 import { ragQuery } from "../../api/rag";
 import { documentStatusRu } from "../../lib/documentStatus";
 import {
   generateFlashcards,
   generateMindmapText,
   generateOfficialReport,
+  generateStructuredTableCsv,
   generateSummaryAndTopics,
   runPodcastAction,
   runQuickAction,
@@ -14,24 +16,18 @@ import {
   type PodcastTone,
 } from "../../lib/workspaceAi";
 import { layoutMindmap, parseMindmapText, type MindLayoutNode } from "../../lib/mindmapParse";
-import { speakRussian, stopSpeaking } from "../../lib/speech";
+import { prefetchVoices, speakPodcastScript, stopSpeaking } from "../../lib/speech";
 import { humanizeChatError } from "../../lib/apiError";
 import { useAuth } from "../../context/AuthContext";
 import { MindmapView } from "./MindmapView";
 import { ProcessingOverlay } from "./ProcessingOverlay";
 
-type Tab = "summary" | "report" | "chat" | "tests" | "flashcards" | "mindmap";
+type Tab = "summary" | "simple" | "short" | "report" | "table" | "chat" | "tests" | "flashcards" | "mindmap";
 
 type Msg = { role: "user" | "assistant"; content: string };
 
 type Props = {
   document: DocumentItem;
-};
-
-const QUICK_LABELS: Record<"simple" | "short" | "test", string> = {
-  simple: "Объяснить просто",
-  short: "Сделать кратко",
-  test: "Тест",
 };
 
 export function DocumentWorkspace({ document }: Props) {
@@ -49,8 +45,9 @@ export function DocumentWorkspace({ document }: Props) {
   const [testsText, setTestsText] = useState<string | null>(null);
   const [cards, setCards] = useState<{ q: string; a: string }[]>([]);
   const [cardsLoading, setCardsLoading] = useState(false);
-  const [quickResult, setQuickResult] = useState<string | null>(null);
-  const [quickKind, setQuickKind] = useState<string | null>(null);
+  const [easySimple, setEasySimple] = useState<string | null>(null);
+  const [easyShort, setEasyShort] = useState<string | null>(null);
+  const [easyLoading, setEasyLoading] = useState<null | "simple" | "short">(null);
   const [reportText, setReportText] = useState<string | null>(null);
   const [reportLoading, setReportLoading] = useState(false);
   const [mindmapRoot, setMindmapRoot] = useState<MindLayoutNode | null>(null);
@@ -60,6 +57,13 @@ export function DocumentWorkspace({ document }: Props) {
   const [podcastPace, setPodcastPace] = useState<PodcastPace>("normal");
   const [podcastScript, setPodcastScript] = useState<string | null>(null);
   const [podcastLoading, setPodcastLoading] = useState(false);
+  const [tableCsv, setTableCsv] = useState<string | null>(null);
+  const [tableModel, setTableModel] = useState<string | null>(null);
+  const [tableFocus, setTableFocus] = useState("");
+  const [tableLoading, setTableLoading] = useState(false);
+  const [tableErr, setTableErr] = useState<string | null>(null);
+  const [sttBusy, setSttBusy] = useState(false);
+  const sttInputRef = useRef<HTMLInputElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const st = document.status.trim().toLowerCase();
@@ -89,6 +93,22 @@ export function DocumentWorkspace({ document }: Props) {
     };
   }, [document.id, ready, authFetch]);
 
+  const onSttFile = async (e: ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    e.target.value = "";
+    if (!f || sttBusy) return;
+    setSttBusy(true);
+    try {
+      const text = await transcribeAudio(f, authFetch, { language: "ru" });
+      setChatInput((prev) => (prev ? `${prev.trim()}\n${text}` : text));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Ошибка STT";
+      setMessages((m) => [...m, { role: "assistant", content: `STT: ${msg}` }]);
+    } finally {
+      setSttBusy(false);
+    }
+  };
+
   const sendChat = async () => {
     const text = chatInput.trim();
     if (!text || chatBusy || !ready) return;
@@ -99,7 +119,7 @@ export function DocumentWorkspace({ document }: Props) {
       const chunks = await ragQuery(text, authFetch, 6, [document.id]);
       setLastChunks(chunks);
       const ctx = chunks.map((c) => c.text).join("\n\n").slice(0, 12000);
-      const system = `Помощник по одному документу. Отвечай на русском только по приведённому контексту. Если в контексте нет ответа — скажи об этом.\n\nКонтекст:\n${ctx || "(пусто)"}`;
+      const system = `Помощник по одному документу. Отвечай на русском только по приведённому контексту. Если в контексте нет ответа — скажи об этом. Пиши обычным текстом, без markdown (#, **, обратные кавычки).\n\nКонтекст:\n${ctx || "(пусто)"}`;
       const reply = await aiChat(text, system, authFetch, { maxTokens: 1200 });
       setMessages((m) => [...m, { role: "assistant", content: reply.content }]);
     } catch (e) {
@@ -110,15 +130,29 @@ export function DocumentWorkspace({ document }: Props) {
     }
   };
 
-  const onQuick = async (kind: "simple" | "short" | "test") => {
+  const genEasySimple = async () => {
     if (!ready) return;
-    setQuickKind(QUICK_LABELS[kind]);
-    setQuickResult("Генерируем…");
+    setEasyLoading("simple");
     try {
-      const t = await runQuickAction(kind, document.id, authFetch);
-      setQuickResult(t);
+      const t = await runQuickAction("simple", document.id, authFetch);
+      setEasySimple(t);
     } catch (e) {
-      setQuickResult(humanizeChatError(e instanceof Error ? e.message : "Ошибка"));
+      setEasySimple(humanizeChatError(e instanceof Error ? e.message : "Ошибка"));
+    } finally {
+      setEasyLoading(null);
+    }
+  };
+
+  const genEasyShort = async () => {
+    if (!ready) return;
+    setEasyLoading("short");
+    try {
+      const t = await runQuickAction("short", document.id, authFetch);
+      setEasyShort(t);
+    } catch (e) {
+      setEasyShort(humanizeChatError(e instanceof Error ? e.message : "Ошибка"));
+    } finally {
+      setEasyLoading(null);
     }
   };
 
@@ -169,6 +203,39 @@ export function DocumentWorkspace({ document }: Props) {
     } finally {
       setPodcastLoading(false);
     }
+  };
+
+  const onExtractTable = async () => {
+    if (!ready) return;
+    setTableLoading(true);
+    setTableErr(null);
+    setTableCsv(null);
+    setTableModel(null);
+    try {
+      const { csv, model } = await generateStructuredTableCsv(
+        document.id,
+        authFetch,
+        tableFocus.trim() || undefined,
+      );
+      setTableCsv(csv ?? "");
+      setTableModel(model ?? "");
+    } catch (e) {
+      setTableErr(humanizeChatError(e instanceof Error ? e.message : "Ошибка"));
+    } finally {
+      setTableLoading(false);
+    }
+  };
+
+  const downloadTableCsv = () => {
+    if (tableCsv === null || tableCsv === "") return;
+    const base = document.original_filename.replace(/\.[^.]+$/, "") || "document";
+    const blob = new Blob([`\ufeff${tableCsv}`], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = window.document.createElement("a");
+    a.href = url;
+    a.download = `${base}-table.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   const onGenerateTests = async () => {
@@ -252,8 +319,11 @@ export function DocumentWorkspace({ document }: Props) {
           <div style={styles.tabs}>
             {(
               [
-                ["summary", "Кратко"],
+                ["summary", "Обзор"],
+                ["simple", "Просто"],
+                ["short", "Кратко"],
                 ["report", "Отчёт"],
+                ["table", "Таблица"],
                 ["chat", "Чат"],
                 ["tests", "Тесты"],
                 ["flashcards", "Карточки"],
@@ -282,6 +352,53 @@ export function DocumentWorkspace({ document }: Props) {
             </div>
           ) : null}
 
+          {tab === "simple" ? (
+            <div style={styles.panel}>
+              <p style={styles.muted}>
+                Объяснение «как для человека»: без лишних терминов, на всю ширину окна. Нажмите «Сгенерировать», когда
+                будете готовы.
+              </p>
+              <div style={styles.rowBetween}>
+                <h3 style={styles.panelTitle}>Простыми словами</h3>
+                <button
+                  type="button"
+                  style={styles.genBtn}
+                  disabled={!ready || easyLoading === "simple"}
+                  onClick={() => void genEasySimple()}
+                >
+                  {easyLoading === "simple" ? "…" : "Сгенерировать"}
+                </button>
+              </div>
+              <p style={styles.bodyText}>
+                {easySimple ??
+                  "Здесь появится текст: что в документе и зачем это важно, простым языком."}
+              </p>
+            </div>
+          ) : null}
+
+          {tab === "short" ? (
+            <div style={styles.panel}>
+              <p style={styles.muted}>
+                Отдельно от вкладки «Обзор»: здесь вы сами запускаете короткий пересказ в 3–5 предложениях по запросу к
+                модели.
+              </p>
+              <div style={styles.rowBetween}>
+                <h3 style={styles.panelTitle}>Краткий пересказ</h3>
+                <button
+                  type="button"
+                  style={styles.genBtn}
+                  disabled={!ready || easyLoading === "short"}
+                  onClick={() => void genEasyShort()}
+                >
+                  {easyLoading === "short" ? "…" : "Сгенерировать"}
+                </button>
+              </div>
+              <p style={styles.bodyText}>
+                {easyShort ?? "Нажмите «Сгенерировать» — получите сжатую выжимку сути материала."}
+              </p>
+            </div>
+          ) : null}
+
           {tab === "report" ? (
             <div style={styles.panel}>
               <div style={styles.rowBetween}>
@@ -302,9 +419,73 @@ export function DocumentWorkspace({ document }: Props) {
             </div>
           ) : null}
 
+          {tab === "table" ? (
+            <div style={styles.panel}>
+              <p style={styles.muted}>
+                По тексту из индекса RAG модель собирает одну таблицу в формате CSV (разделитель — запятая). Файл можно
+                открыть в Excel или Google Таблицах. При необходимости уточните, какие сущности или столбцы важнее.
+              </p>
+              <label style={styles.lblTable}>
+                Уточнение для таблицы (необязательно)
+                <input
+                  type="text"
+                  style={styles.inputTable}
+                  placeholder="Например: только сроки и ответственные"
+                  value={tableFocus}
+                  disabled={!ready || tableLoading}
+                  onChange={(e) => setTableFocus(e.target.value)}
+                />
+              </label>
+              <div style={styles.rowBetween}>
+                <h3 style={styles.panelTitle}>Структурированные данные</h3>
+                <button type="button" style={styles.genBtn} disabled={!ready || tableLoading} onClick={() => void onExtractTable()}>
+                  {tableLoading ? "…" : "Сформировать CSV"}
+                </button>
+              </div>
+              {tableLoading ? <p style={styles.muted}>Запрос к серверу и модели…</p> : null}
+              {tableErr ? (
+                <p style={styles.tableErr} role="alert">
+                  {tableErr}
+                </p>
+              ) : null}
+              {tableCsv !== null ? (
+                <>
+                  {tableCsv === "" ? (
+                    <p style={styles.tableWarn}>
+                      Модель вернула пустой CSV. Попробуйте уточнение в поле выше, другой документ или проверьте ключ
+                      LLM и логи ai-service. Если недавно обновляли код — пересоберите контейнер ai-service (эндпоинт{" "}
+                      <code style={styles.codeSm}>/api/v1/ai/extract-table</code>).
+                    </p>
+                  ) : (
+                    <pre style={styles.preTable}>{tableCsv}</pre>
+                  )}
+                  <div style={styles.tableActions}>
+                    <button
+                      type="button"
+                      style={{
+                        ...styles.genBtn,
+                        ...(tableCsv === "" ? styles.tableBtnDisabled : {}),
+                      }}
+                      disabled={tableCsv === ""}
+                      onClick={() => downloadTableCsv()}
+                    >
+                      Скачать .csv
+                    </button>
+                    {tableModel ? <span style={styles.mutedSm}>Модель: {tableModel}</span> : null}
+                  </div>
+                </>
+              ) : !tableLoading && !tableErr ? (
+                <p style={styles.muted}>Нажмите «Сформировать CSV» — здесь появится превью.</p>
+              ) : null}
+            </div>
+          ) : null}
+
           {tab === "chat" ? (
             <div style={styles.panelChat}>
-              <p style={styles.chatHint}>Вопросы только по этому файлу. Источники — внизу после ответа.</p>
+              <p style={styles.chatHint}>
+                Вопросы только по этому файлу. Источники — внизу после ответа. Кнопка 🎤 — речь в текст через STT
+                (сервер из <code style={styles.codeSm}>STT_BASE_URL</code>, для хакатона обычно порт <strong>6640</strong>).
+              </p>
               <div style={styles.chatThread}>
                 {messages.map((msg, i) => (
                   <div key={i} style={{ ...styles.chatRow, ...(msg.role === "user" ? styles.chatUser : {}) }}>
@@ -335,6 +516,22 @@ export function DocumentWorkspace({ document }: Props) {
                 </details>
               ) : null}
               <div style={styles.chatComposer}>
+                <input
+                  ref={sttInputRef}
+                  type="file"
+                  accept="audio/*,.webm,.wav,.mp3,.m4a,.ogg,.flac"
+                  style={{ display: "none" }}
+                  onChange={(e) => void onSttFile(e)}
+                />
+                <button
+                  type="button"
+                  style={styles.sttBtn}
+                  disabled={chatBusy || !ready || sttBusy}
+                  title="Аудио → текст в поле"
+                  onClick={() => sttInputRef.current?.click()}
+                >
+                  {sttBusy ? "…" : "🎤"}
+                </button>
                 <textarea
                   style={styles.textarea}
                   rows={2}
@@ -422,12 +619,6 @@ export function DocumentWorkspace({ document }: Props) {
         <aside style={styles.right}>
           <h3 style={styles.h3}>Быстрые действия</h3>
           <div style={styles.quickList}>
-            <button type="button" style={styles.quickBtn} disabled={!ready} onClick={() => void onQuick("simple")}>
-              Объяснить просто
-            </button>
-            <button type="button" style={styles.quickBtn} disabled={!ready} onClick={() => void onQuick("short")}>
-              Сделать кратко
-            </button>
             <button type="button" style={styles.quickBtn} disabled={!ready} onClick={() => void onGenerateTests()}>
               Создать тест
             </button>
@@ -468,7 +659,9 @@ export function DocumentWorkspace({ document }: Props) {
                     <button
                       type="button"
                       style={styles.miniBtn}
-                      onClick={() => speakRussian(podcastScript, podcastPace)}
+                      onClick={() => {
+                        void prefetchVoices().then(() => speakPodcastScript(podcastScript, podcastPace));
+                      }}
                     >
                       Озвучить в браузере
                     </button>
@@ -479,7 +672,9 @@ export function DocumentWorkspace({ document }: Props) {
                 </>
               ) : null}
               <p style={styles.podcastHint}>
-                Озвучка — Web Speech API (голос зависит от браузера и ОС). Для продакшена можно подключить TTS-сервис.
+                Озвучка через движок браузера: для строк «Алексей»/«Мария» подбираются разные русские голоса (если ОС их
+                дала); иначе различаются высотой тона. Качество зависит от Chrome/Edge/Safari и установленных языковых
+                пакетов.
               </p>
             </div>
             <button
@@ -494,12 +689,6 @@ export function DocumentWorkspace({ document }: Props) {
               Mindmap (граф)
             </button>
           </div>
-          {quickResult ? (
-            <div style={styles.quickOut}>
-              <p style={styles.quickOutTitle}>{quickKind ?? "Результат"}</p>
-              <pre style={styles.preSm}>{quickResult}</pre>
-            </div>
-          ) : null}
         </aside>
       </div>
     </div>
@@ -607,7 +796,18 @@ const styles: Record<string, CSSProperties> = {
   sources: { padding: "0 18px", fontSize: "0.82rem", color: "var(--muted)" },
   srcOl: { margin: "8px 0 0", paddingLeft: 18 },
   srcMeta: { color: "var(--accent)", fontWeight: 600 },
-  chatComposer: { display: "flex", gap: 8, padding: 14, borderTop: "1px solid var(--border)", marginTop: "auto" },
+  chatComposer: { display: "flex", gap: 8, padding: 14, borderTop: "1px solid var(--border)", marginTop: "auto", alignItems: "flex-end" },
+  sttBtn: {
+    width: 44,
+    minHeight: 48,
+    flexShrink: 0,
+    borderRadius: 10,
+    border: "1px solid var(--border)",
+    background: "rgba(255,255,255,0.06)",
+    fontSize: "1rem",
+    cursor: "pointer",
+    color: "var(--text)",
+  },
   textarea: {
     flex: 1,
     minHeight: 48,
@@ -729,7 +929,48 @@ const styles: Record<string, CSSProperties> = {
     cursor: "pointer",
     textAlign: "left",
   },
-  quickOut: { marginTop: 16, paddingTop: 12, borderTop: "1px solid var(--border)" },
-  quickOutTitle: { margin: "0 0 6px", fontSize: "0.75rem", color: "var(--muted)", textTransform: "uppercase" },
+  codeSm: { fontSize: "0.85em", padding: "1px 6px", borderRadius: 4, background: "rgba(0,0,0,0.2)" },
+  lblTable: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 6,
+    marginBottom: 14,
+    fontSize: "0.82rem",
+    color: "var(--muted)",
+  },
+  inputTable: {
+    padding: "10px 12px",
+    borderRadius: 10,
+    border: "1px solid var(--border)",
+    background: "rgba(255,255,255,0.04)",
+    color: "var(--text)",
+    fontSize: "0.9rem",
+  },
+  preTable: {
+    margin: "12px 0 0",
+    maxHeight: 280,
+    overflow: "auto",
+    whiteSpace: "pre-wrap",
+    fontSize: "0.82rem",
+    lineHeight: 1.45,
+    padding: 12,
+    borderRadius: 10,
+    border: "1px solid var(--border)",
+    background: "rgba(0,0,0,0.2)",
+  },
+  tableActions: { display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12, marginTop: 12 },
+  tableErr: { color: "var(--danger)", fontSize: "0.9rem", marginTop: 8 },
+  tableWarn: {
+    margin: "12px 0 0",
+    padding: 12,
+    borderRadius: 10,
+    border: "1px solid rgba(251, 191, 36, 0.35)",
+    background: "rgba(251, 191, 36, 0.08)",
+    color: "var(--text)",
+    fontSize: "0.88rem",
+    lineHeight: 1.5,
+  },
+  tableBtnDisabled: { opacity: 0.45, cursor: "not-allowed" },
+  mutedSm: { fontSize: "0.78rem", color: "var(--muted)" },
   preSm: { margin: 0, fontSize: "0.78rem", whiteSpace: "pre-wrap", maxHeight: 200, overflow: "auto" },
 };

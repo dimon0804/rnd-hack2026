@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
+
+const DOCS_PAGE_SIZE = 8;
 import { Link, useNavigate } from "react-router-dom";
 import { listDocuments, uploadDocument, type DocumentItem, type DocumentUploadResult } from "../api/documents";
 import { documentStatusRu } from "../lib/documentStatus";
@@ -19,6 +21,7 @@ export function UploadPanel() {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<DocumentUploadResult | null>(null);
   const [docs, setDocs] = useState<DocumentItem[] | null>(null);
+  const [docsPage, setDocsPage] = useState(1);
 
   const refreshList = useCallback(async () => {
     if (!isAuthenticated) {
@@ -37,6 +40,22 @@ export function UploadPanel() {
     if (!isHydrated || !isAuthenticated) return;
     void refreshList();
   }, [isHydrated, isAuthenticated, refreshList]);
+
+  const docsTotalPages = useMemo(() => {
+    if (!docs?.length) return 1;
+    return Math.max(1, Math.ceil(docs.length / DOCS_PAGE_SIZE));
+  }, [docs]);
+
+  const pagedDocs = useMemo(() => {
+    if (!docs) return [];
+    const start = (docsPage - 1) * DOCS_PAGE_SIZE;
+    return docs.slice(start, start + DOCS_PAGE_SIZE);
+  }, [docs, docsPage]);
+
+  useEffect(() => {
+    if (docs === null) return;
+    setDocsPage((p) => Math.min(Math.max(1, p), docsTotalPages));
+  }, [docs, docsTotalPages]);
 
   const onFiles = async (files: FileList | null) => {
     const file = files?.[0];
@@ -69,7 +88,7 @@ export function UploadPanel() {
           <p style={styles.kicker}>Рабочий стол</p>
           <h1 style={styles.title}>Загрузка документов</h1>
           <p style={styles.subtitle}>
-            PDF, DOCX или TXT до 50&nbsp;MB. Файл сохраняется и ставится в очередь на чанкинг и индексацию в RAG.
+            PDF, DOCX, PPTX или TXT до 50&nbsp;MB. Файл сохраняется и ставится в очередь на чанкинг и индексацию в RAG.
           </p>
         </div>
         <ol style={styles.steps}>
@@ -144,7 +163,7 @@ export function UploadPanel() {
           >
             <input
               type="file"
-              accept=".pdf,.docx,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
+              accept=".pdf,.docx,.pptx,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.presentationml.presentation,text/plain"
               style={styles.file}
               disabled={busy}
               onChange={(e) => void onFiles(e.target.files)}
@@ -155,7 +174,7 @@ export function UploadPanel() {
               </span>
               <span style={styles.dropTitle}>{busy ? "Загрузка…" : "Перетащите файл сюда"}</span>
               <span style={styles.dropHint}>или нажмите в эту область, чтобы выбрать с диска</span>
-              <span style={styles.formats}>PDF · DOCX · TXT</span>
+              <span style={styles.formats}>PDF · DOCX · PPTX · TXT</span>
             </div>
           </div>
 
@@ -208,21 +227,56 @@ export function UploadPanel() {
           ) : docs.length === 0 ? (
             <p style={styles.muted}>Пока пусто — загрузите первый файл слева.</p>
           ) : (
-            <ul style={styles.list}>
-              {docs.map((d) => (
-                <li key={d.id} style={styles.li}>
-                  <Link to={`/workspace/${d.id}`} style={styles.liLink}>
-                    <div style={styles.liMain}>
-                      <div style={styles.docName}>{d.original_filename}</div>
-                      <div style={styles.docMeta}>
-                        {formatBytes(d.size_bytes)} · {new Date(d.created_at).toLocaleString()}
+            <>
+              <ul style={styles.list}>
+                {pagedDocs.map((d) => (
+                  <li key={d.id} style={styles.li}>
+                    <Link to={`/workspace/${d.id}`} style={styles.liLink} title={d.original_filename}>
+                      <div style={styles.liMain}>
+                        <div style={styles.docName}>{d.original_filename}</div>
+                        <div style={styles.docMeta}>
+                          {formatBytes(d.size_bytes)} · {new Date(d.created_at).toLocaleString()}
+                        </div>
                       </div>
-                    </div>
-                  </Link>
-                  <span style={styles.badge}>{documentStatusRu(d.status)}</span>
-                </li>
-              ))}
-            </ul>
+                    </Link>
+                    <span style={styles.liBadgeWrap}>
+                      <span style={styles.badge}>{documentStatusRu(d.status)}</span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              {docs.length > DOCS_PAGE_SIZE ? (
+                <div style={styles.pagination}>
+                  <button
+                    type="button"
+                    style={{ ...styles.pageBtn, ...(docsPage <= 1 ? styles.pageBtnDisabled : {}) }}
+                    disabled={docsPage <= 1}
+                    onClick={() => setDocsPage((p) => Math.max(1, p - 1))}
+                  >
+                    Назад
+                  </button>
+                  <span style={styles.pageInfo}>
+                    {(docsPage - 1) * DOCS_PAGE_SIZE + 1}–{Math.min(docsPage * DOCS_PAGE_SIZE, docs.length)} из{" "}
+                    {docs.length}
+                  </span>
+                  <button
+                    type="button"
+                    style={{
+                      ...styles.pageBtn,
+                      ...(docsPage >= docsTotalPages ? styles.pageBtnDisabled : {}),
+                    }}
+                    disabled={docsPage >= docsTotalPages}
+                    onClick={() => setDocsPage((p) => Math.min(docsTotalPages, p + 1))}
+                  >
+                    Вперёд
+                  </button>
+                </div>
+              ) : (
+                <p style={styles.listMeta}>
+                  {docs.length} {docs.length === 1 ? "файл" : docs.length < 5 ? "файла" : "файлов"}
+                </p>
+              )}
+            </>
           )}
           <div style={styles.sideFoot}>
             <Link to="/" style={styles.inlineLink}>
@@ -238,7 +292,7 @@ export function UploadPanel() {
 
 const styles: Record<string, CSSProperties> = {
   wrap: {
-    maxWidth: 960,
+    maxWidth: 1240,
     margin: "0 auto",
     padding: "28px 20px 72px",
     display: "flex",
@@ -357,11 +411,12 @@ const styles: Record<string, CSSProperties> = {
     background: "var(--bg-elevated)",
     border: "1px solid var(--border)",
     borderRadius: "var(--radius)",
-    padding: 20,
+    padding: "22px 22px 20px",
     boxShadow: "var(--shadow)",
     animation: "fadeUp 0.55s ease both",
+    minWidth: 0,
   },
-  sideHead: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 12 },
+  sideHead: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 14 },
   sideFoot: {
     margin: "16px 0 0",
     paddingTop: 12,
@@ -465,14 +520,24 @@ const styles: Record<string, CSSProperties> = {
     fontSize: "0.88rem",
   },
   muted: { color: "var(--muted)", margin: 0, fontSize: "0.9rem", lineHeight: 1.5 },
-  list: { listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 10 },
+  list: {
+    listStyle: "none",
+    margin: 0,
+    padding: 0,
+    display: "flex",
+    flexDirection: "column",
+    gap: 10,
+    maxHeight: "min(62vh, 640px)",
+    overflowY: "auto",
+    paddingRight: 4,
+  },
   li: {
     display: "flex",
     alignItems: "flex-start",
     justifyContent: "space-between",
-    gap: 12,
-    padding: 12,
-    borderRadius: 10,
+    gap: 14,
+    padding: "14px 14px",
+    borderRadius: 12,
     border: "1px solid var(--border)",
     background: "rgba(255,255,255,0.03)",
   },
@@ -483,6 +548,39 @@ const styles: Record<string, CSSProperties> = {
     textDecoration: "none",
   },
   liMain: { minWidth: 0, flex: 1 },
-  docName: { fontWeight: 600, fontSize: "0.92rem", wordBreak: "break-word" },
-  docMeta: { color: "var(--muted)", fontSize: "0.8rem", marginTop: 4 },
+  liBadgeWrap: { flexShrink: 0, paddingTop: 2 },
+  docName: {
+    fontWeight: 600,
+    fontSize: "0.95rem",
+    lineHeight: 1.35,
+    wordBreak: "break-word",
+    display: "-webkit-box",
+    WebkitLineClamp: 3,
+    WebkitBoxOrient: "vertical",
+    overflow: "hidden",
+  } as CSSProperties,
+  docMeta: { color: "var(--muted)", fontSize: "0.82rem", marginTop: 6, lineHeight: 1.4 },
+  pagination: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+    flexWrap: "wrap",
+    marginTop: 14,
+    paddingTop: 14,
+    borderTop: "1px solid var(--border)",
+  },
+  pageBtn: {
+    padding: "8px 14px",
+    borderRadius: 10,
+    border: "1px solid var(--border)",
+    background: "rgba(255,255,255,0.05)",
+    color: "var(--text)",
+    fontSize: "0.86rem",
+    fontWeight: 600,
+    cursor: "pointer",
+  },
+  pageBtnDisabled: { opacity: 0.42, cursor: "not-allowed" },
+  pageInfo: { fontSize: "0.86rem", color: "var(--muted)", flex: 1, textAlign: "center", minWidth: 120 },
+  listMeta: { margin: "12px 0 0", fontSize: "0.82rem", color: "var(--muted)" },
 };

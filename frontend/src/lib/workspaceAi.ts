@@ -1,8 +1,13 @@
-import { aiChat } from "../api/ai";
+import { aiChat, aiExtractTable } from "../api/ai";
 import { reindexDocument } from "../api/documents";
 import { ragDocumentChunks, ragQuery, type RagChunk } from "../api/rag";
+import { stripAiMarkdown } from "./stripAiMarkdown";
 
 const MAX_CTX = 12000;
+
+/** Во все ответы для UI — без #, ** и прочего markdown. */
+const PLAIN_TEXT_RULE =
+  "Пиши обычным текстом для человека. Запрещено markdown: не используй #, ##, **, __, обратные кавычки для выделения.";
 
 type AuthFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
@@ -62,7 +67,8 @@ export async function generateSummaryAndTopics(documentId: string, authFetch: Au
       topics: [],
     };
   }
-  const system = `Ты аналитик текстов. Отвечай только на русском. Формат ответа строго такой (без markdown-заголовков #):
+  const system = `Ты аналитик текстов. Отвечай только на русском. ${PLAIN_TEXT_RULE}
+Формат ответа строго такой:
 КРАТКО: (2–4 предложения суть документа)
 ТЕМЫ: (каждая тема с новой строки, начинай строку с «- »)`;
   const prompt = `Вот фрагменты из документа:\n\n${ctx}\n\nСделай КРАТКО и ТЕМЫ по инструкции.`;
@@ -82,7 +88,10 @@ export async function generateSummaryAndTopics(documentId: string, authFetch: Au
   } else {
     summary = content.slice(0, 800);
   }
-  return { summary, topics: topics.slice(0, 12) };
+  return {
+    summary: stripAiMarkdown(summary),
+    topics: topics.slice(0, 12).map((t) => stripAiMarkdown(t)),
+  };
 }
 
 export type PodcastTone = "academic" | "popular";
@@ -111,7 +120,8 @@ export async function runPodcastAction(
   const system = `Ты пишешь сценарий аудиоподкаста на русском. Два ведущих: Алексей и Мария.
 ${toneRu}
 ${paceRu}
-Формат строго: строки «Алексей: …» и «Мария: …». Всего 14–22 реплики, обсуждают содержание материала, не уходят в сторону.`;
+${PLAIN_TEXT_RULE}
+Формат строго: каждая реплика с новой строки, префикс «Алексей: » или «Мария: » (без звёздочек и решёток). Всего 14–22 реплики, только о содержании материала.`;
   const res = await aiChat(`Материал для обсуждения:\n\n${ctx}`, system, authFetch, {
     maxTokens: 2400,
     temperature: 0.38,
@@ -126,7 +136,8 @@ export async function generateOfficialReport(documentId: string, authFetch: Auth
     return "Нет текста в индексе для формирования отчёта. Проверьте статус документа.";
   }
   const system = `Ты составитель официальных справок. Только русский, строго деловой стиль (внутренняя справка для руководства).
-Используй ровно такую структуру и заголовки:
+${PLAIN_TEXT_RULE}
+Используй ровно такую структуру и заголовки ЗАГЛАВНЫМИ словами без символа #:
 
 СПРАВКА
 ОБЪЕКТ: (одна строка — о чём документ)
@@ -146,7 +157,7 @@ export async function generateOfficialReport(documentId: string, authFetch: Auth
 5. РЕКОМЕНДАЦИИ
 (если в тексте нет основы — напиши: «В документе рекомендации не сформулированы»)
 
-Не используй markdown (#).`;
+`;
   const res = await aiChat(`Исходные фрагменты документа:\n\n${ctx}`, system, authFetch, {
     maxTokens: 2200,
     temperature: 0.2,
@@ -158,12 +169,12 @@ export async function generateOfficialReport(documentId: string, authFetch: Auth
 export async function generateMindmapText(documentId: string, authFetch: AuthFetch): Promise<string> {
   const ctx = await contextFromDocument(documentId, authFetch);
   if (!ctx.trim()) return "";
-  const system = `Построй иерархию ключевых понятий для интеллект-карты. Только русский.
+  const system = `Построй иерархию ключевых понятий для интеллект-карты. Только русский. ${PLAIN_TEXT_RULE}
 Формат:
 - Каждая строка — одна тема; вложенность задаётся отступом из двух пробелов на уровень (не табуляция).
 - Корневые темы без отступа; подтемы с 2, 4, 6… пробелов в начале.
 - После отступа можно «- » перед названием.
-- Без заголовков #, без нумерации вида «1.», только многострочный список.
+- Без нумерации вида «1.», только многострочный список с отступами.
 - 12–28 строк, без дубликатов.`;
   const res = await aiChat(`Текст документа:\n\n${ctx}`, system, authFetch, {
     maxTokens: 1600,
@@ -183,15 +194,15 @@ export async function runQuickAction(
   }
   const prompts: Record<typeof kind, { system: string; user: string }> = {
     simple: {
-      system: "Объясняй простым языком, как для старшеклассника. Только русский.",
+      system: `Объясняй простым языком, как для старшеклассника. Только русский. ${PLAIN_TEXT_RULE}`,
       user: `Объясни простыми словами, о чём этот материал:\n\n${ctx}`,
     },
     short: {
-      system: "Сжато и по делу. Русский.",
+      system: `Сжато и по делу. Русский. ${PLAIN_TEXT_RULE}`,
       user: `Сделай очень краткий пересказ в 3–5 предложениях:\n\n${ctx}`,
     },
     test: {
-      system: "Составь учебный тест на русском. Формат: для каждого вопроса номер, вопрос, строки А) Б) В) Г), затем строка «Правильно: буква».",
+      system: `Составь учебный тест на русском. ${PLAIN_TEXT_RULE} Формат: для каждого вопроса номер, вопрос, строки А) Б) В) Г), затем строка «Правильно: буква».`,
       user: `По тексту составь 5 вопросов с вариантами:\n\n${ctx}`,
     },
   };
@@ -212,6 +223,7 @@ export async function generateFlashcards(documentId: string, authFetch: AuthFetc
   }
   const system = `Ты помощник для учёбы. Ниже уже передан ПОЛНЫЙ текст документа — работай только с ним.
 НЕ проси пользователя прислать текст. НЕ отвечай отказом.
+${PLAIN_TEXT_RULE}
 Сгенерируй 8 карточек для запоминания по этому тексту. Только русский язык.
 Формат строго: для каждой карточки две строки:
 В: <краткий вопрос>
@@ -229,7 +241,7 @@ export async function generateFlashcards(documentId: string, authFetch: AuthFetc
     const v = line.replace(/^В:\s*/i, "").replace(/^О:\s*/i, "").trim();
     if (/^В:/i.test(line)) q = v;
     else if (/^О:/i.test(line) && q) {
-      out.push({ q, a: v });
+      out.push({ q: stripAiMarkdown(q), a: stripAiMarkdown(v) });
       q = "";
     }
   }
@@ -248,4 +260,18 @@ export async function generateFlashcards(documentId: string, authFetch: AuthFetc
     ];
   }
   return [{ q: "Карточки (свободный формат)", a: raw.slice(0, 1200) }];
+}
+
+/** Таблица в CSV по содержимому документа из RAG (открывается в Excel). */
+export async function generateStructuredTableCsv(
+  documentId: string,
+  authFetch: AuthFetch,
+  focus?: string,
+): Promise<{ csv: string; model: string }> {
+  const ctx = await contextFromDocument(documentId, authFetch);
+  if (!ctx.trim()) {
+    throw new Error("Нет текста в индексе для извлечения таблицы.");
+  }
+  const res = await aiExtractTable(ctx, authFetch, { focus, maxTokens: 2200 });
+  return { csv: res.csv_text, model: res.model };
 }
