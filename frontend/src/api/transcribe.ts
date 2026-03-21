@@ -1,3 +1,5 @@
+import { ensureSttCompatibleFile } from "../lib/audioStt";
+
 function apiBase(): string {
   return import.meta.env.VITE_API_BASE ?? "";
 }
@@ -5,8 +7,20 @@ function apiBase(): string {
 async function parseError(res: Response): Promise<string> {
   const text = await res.text();
   try {
-    const j = JSON.parse(text) as { detail?: unknown };
-    if (typeof j.detail === "string") return j.detail;
+    const j = JSON.parse(text) as {
+      detail?: unknown;
+      error?: { message?: string };
+    };
+    if (typeof j.error?.message === "string") return j.error.message;
+    if (typeof j.detail === "string") {
+      try {
+        const inner = JSON.parse(j.detail) as { error?: { message?: string } };
+        if (typeof inner?.error?.message === "string") return inner.error.message;
+      } catch {
+        /* detail не JSON */
+      }
+      return j.detail;
+    }
     if (Array.isArray(j.detail)) {
       const first = j.detail[0] as { msg?: string } | undefined;
       if (first?.msg) return first.msg;
@@ -23,8 +37,9 @@ export async function transcribeAudio(
   authFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>,
   opts?: { language?: string; model?: string },
 ): Promise<string> {
+  const toSend = await ensureSttCompatibleFile(file);
   const form = new FormData();
-  form.append("file", file);
+  form.append("file", toSend);
   if (opts?.language) form.append("language", opts.language);
   if (opts?.model) form.append("model", opts.model);
 
