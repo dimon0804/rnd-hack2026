@@ -200,35 +200,49 @@ export async function generateMindmapText(documentIds: string[], authFetch: Auth
   return res.content.trim();
 }
 
-/** Структура слайдов по тексту из RAG (для переноса в PowerPoint / Google Slides вручную или через экспорт .txt). */
-export async function generatePresentationOutline(documentIds: string[], authFetch: AuthFetch): Promise<string> {
+/**
+ * JSON для HTML-презентации (стиль Gamma): только валидный JSON, без markdown и без пояснений до/после.
+ * Клиент собирает .html и предлагает скачать.
+ */
+export async function generatePresentationDeckJson(documentIds: string[], authFetch: AuthFetch): Promise<string> {
   const ctx = await contextFromDocuments(documentIds, authFetch);
   if (!ctx.trim()) {
-    return "Нет текста в индексе для формирования презентации. Проверьте статус документа.";
+    return JSON.stringify({
+      deck_title: "Ошибка",
+      slides: [
+        {
+          type: "title",
+          title: "Нет данных",
+          subtitle: "Текст документа не найден в индексе RAG. Проверьте статус и повторите индексацию.",
+        },
+      ],
+    });
   }
   const multi = documentIds.length > 1;
-  const system = `Ты составитель структуры слайдов для устной презентации на русском. Только русский.
-${PLAIN_TEXT_RULE}
-Построй план презентации по материалу: 8–14 слайдов (не больше 14).
-${multi ? "Материал может объединять несколько связанных документов — логично сгруппируй слайды по темам.\n" : ""}
-Формат строго, каждый слайд отдельным блоком:
+  const system = `Ты составитель презентаций в стиле Gamma (крупные заголовки, тёмный фон, мало текста на слайд). Только русский.
+Верни ТОЛЬКО один JSON-объект без markdown, без \`\`\`, без комментариев до или после.
 
-СЛАЙД N
-ЗАГОЛОВОК: (одна короткая строка без двоеточия внутри)
-ТЕЗИСЫ:
-- (тезис)
-- (тезис)
-(1–4 тезиса на слайд)
+Схема:
+{
+  "deck_title": "короткое название всей презентации",
+  "slides": [ ... ]
+}
 
-Первый слайд — название презентации и цель или вопрос доклада.
-Один из средних слайдов при необходимости — обзор структуры или ключевых блоков.
-Последний слайд — выводы; при уместности финальная строка «Спасибо за внимание» или призыв к действию.
-Не используй символы markdown (#, **).`;
+Элементы slides — объекты с полем "type":
+- "title" — первый слайд: { "type": "title", "title": "...", "subtitle": "цель или подзаголовок в 1–2 предложения" }
+- "section" — разделитель раздела (опционально 1–2 шт): { "type": "section", "title": "...", "subtitle": "опционально" }
+- "content" — основной контент: { "type": "content", "title": "заголовок слайда", "bullets": ["тезис 1", "тезис 2", ...] } — 2–4 тезиса, короткие фразы
+- "closing" — финал: { "type": "closing", "title": "Выводы или Спасибо за внимание", "line": "опционально одна строка призыва" }
+
+Всего 8–14 слайдов (включая title и closing). Логичная последовательность; без дублирования.
+${multi ? "Несколько связанных документов — логично сгруппируй слайды по темам." : ""}
+
+Экранируй кавычки внутри строк как \\" в JSON.`;
   const res = await aiChat(`Исходный текст:\n\n${ctx}`, system, authFetch, {
-    maxTokens: 2800,
-    temperature: 0.25,
+    maxTokens: 3200,
+    temperature: 0.22,
   });
-  return res.content;
+  return res.content.trim();
 }
 
 export async function runQuickAction(

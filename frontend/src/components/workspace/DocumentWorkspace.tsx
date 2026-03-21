@@ -7,7 +7,7 @@ import {
   generateFlashcards,
   generateMindmapText,
   generateOfficialReport,
-  generatePresentationOutline,
+  generatePresentationDeckJson,
   generateStructuredTableCsv,
   generateSummaryAndTopics,
   runPodcastAction,
@@ -18,6 +18,7 @@ import {
 import { layoutMindmap, parseMindmapText, type MindLayoutNode } from "../../lib/mindmapParse";
 import { prefetchVoices, speakPodcastScript, stopSpeaking } from "../../lib/speech";
 import { humanizeChatError } from "../../lib/apiError";
+import { buildGammaHtmlFile, parseGammaDeckJson, triggerHtmlDownload } from "../../lib/gammaDeck";
 import { useAuth } from "../../context/AuthContext";
 import { MindmapView } from "./MindmapView";
 import { ProcessingOverlay } from "./ProcessingOverlay";
@@ -64,7 +65,8 @@ export function DocumentWorkspace({ document }: Props) {
   const [mindmapRoot, setMindmapRoot] = useState<MindLayoutNode | null>(null);
   const [mindmapLoading, setMindmapLoading] = useState(false);
   const [mindmapRaw, setMindmapRaw] = useState<string | null>(null);
-  const [presentationText, setPresentationText] = useState<string | null>(null);
+  const [presentationHtml, setPresentationHtml] = useState<string | null>(null);
+  const [presentationErr, setPresentationErr] = useState<string | null>(null);
   const [presentationLoading, setPresentationLoading] = useState(false);
   const [podcastTone, setPodcastTone] = useState<PodcastTone>("popular");
   const [podcastPace, setPodcastPace] = useState<PodcastPace>("normal");
@@ -174,30 +176,31 @@ export function DocumentWorkspace({ document }: Props) {
     }
   };
 
+  const baseFilename = () => document.original_filename.replace(/\.[^.]+$/, "") || "presentation";
+
   const buildPresentation = async () => {
     if (!ready) return;
     setPresentationLoading(true);
-    setPresentationText(null);
+    setPresentationHtml(null);
+    setPresentationErr(null);
     try {
-      const t = await generatePresentationOutline(ragIds, authFetch);
-      setPresentationText(t);
+      const raw = await generatePresentationDeckJson(ragIds, authFetch);
+      const deck = parseGammaDeckJson(raw);
+      const html = buildGammaHtmlFile(deck);
+      setPresentationHtml(html);
+      triggerHtmlDownload(html, `${baseFilename()}-gamma.html`);
     } catch (e) {
-      setPresentationText(humanizeChatError(e instanceof Error ? e.message : "Ошибка"));
+      const msg = e instanceof Error ? e.message : "Ошибка";
+      setPresentationErr(humanizeChatError(msg));
+      setPresentationHtml(null);
     } finally {
       setPresentationLoading(false);
     }
   };
 
-  const downloadPresentationTxt = () => {
-    if (presentationText === null || presentationText.trim() === "") return;
-    const base = document.original_filename.replace(/\.[^.]+$/, "") || "presentation";
-    const blob = new Blob([`\ufeff${presentationText}`], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = window.document.createElement("a");
-    a.href = url;
-    a.download = `${base}-slides.txt`;
-    a.click();
-    URL.revokeObjectURL(url);
+  const downloadPresentationAgain = () => {
+    if (!presentationHtml) return;
+    triggerHtmlDownload(presentationHtml, `${baseFilename()}-gamma.html`);
   };
 
   const buildMindmap = async () => {
@@ -623,8 +626,9 @@ export function DocumentWorkspace({ document }: Props) {
           {tab === "presentation" ? (
             <div style={styles.panel}>
               <p style={styles.muted}>
-                По тексту из индекса RAG формируется структура слайдов (заголовки и тезисы). Перенесите в PowerPoint или
-                Google Презентации, оформите шаблон по вкусу. Можно скачать как .txt.
+                По тексту из RAG собирается готовый файл <strong>.html</strong> в духе Gamma: тёмный градиент, крупные
+                заголовки, мало текста на слайд. После генерации файл <strong>скачивается автоматически</strong> — откройте
+                его в браузере, листайте стрелками или пробелом; при необходимости «Печать» → PDF.
               </p>
               <div style={styles.rowBetween}>
                 <h3 style={styles.panelTitle}>Презентация</h3>
@@ -634,29 +638,29 @@ export function DocumentWorkspace({ document }: Props) {
                   disabled={!ready || presentationLoading}
                   onClick={() => void buildPresentation()}
                 >
-                  {presentationLoading ? "…" : "Создать по тексту"}
+                  {presentationLoading ? "…" : "Создать и скачать"}
                 </button>
               </div>
-              {presentationLoading ? <p style={styles.muted}>Генерируем структуру слайдов…</p> : null}
-              {presentationText !== null ? (
+              {presentationLoading ? <p style={styles.muted}>Генерируем слайды и готовим файл…</p> : null}
+              {presentationErr ? (
+                <p style={styles.tableErr} role="alert">
+                  {presentationErr}
+                </p>
+              ) : null}
+              {presentationHtml && !presentationLoading ? (
                 <>
-                  <pre style={styles.pre}>{presentationText}</pre>
+                  <div style={styles.gammaOk}>
+                    <strong>Готово.</strong> Файл уже сохранён в загрузки. Ниже — предпросмотр.
+                  </div>
                   <div style={styles.tableActions}>
-                    <button
-                      type="button"
-                      style={{
-                        ...styles.genBtn,
-                        ...(presentationText.trim() === "" ? styles.tableBtnDisabled : {}),
-                      }}
-                      disabled={presentationText.trim() === ""}
-                      onClick={() => downloadPresentationTxt()}
-                    >
-                      Скачать .txt
+                    <button type="button" style={styles.genBtn} onClick={() => downloadPresentationAgain()}>
+                      Скачать снова (.html)
                     </button>
                   </div>
+                  <iframe title="Предпросмотр презентации" style={styles.gammaFrame} srcDoc={presentationHtml} sandbox="allow-scripts allow-same-origin" />
                 </>
-              ) : !presentationLoading ? (
-                <p style={styles.muted}>Нажмите «Создать по тексту».</p>
+              ) : !presentationLoading && !presentationErr ? (
+                <p style={styles.muted}>Нажмите «Создать и скачать» — браузер предложит файл презентации.</p>
               ) : null}
             </div>
           ) : null}
@@ -1046,6 +1050,23 @@ const styles: Record<string, CSSProperties> = {
   },
   tableActions: { display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12, marginTop: 12 },
   tableErr: { color: "var(--danger)", fontSize: "0.9rem", marginTop: 8 },
+  gammaOk: {
+    marginTop: 12,
+    padding: "12px 14px",
+    borderRadius: 10,
+    background: "rgba(110, 231, 183, 0.1)",
+    border: "1px solid rgba(110, 231, 183, 0.25)",
+    fontSize: "0.9rem",
+    lineHeight: 1.45,
+  },
+  gammaFrame: {
+    width: "100%",
+    height: 420,
+    border: "1px solid var(--border)",
+    borderRadius: 12,
+    marginTop: 12,
+    background: "#0a0a0f",
+  },
   tableWarn: {
     margin: "12px 0 0",
     padding: 12,
