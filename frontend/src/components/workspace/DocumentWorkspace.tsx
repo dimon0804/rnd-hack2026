@@ -18,7 +18,8 @@ import {
 import { layoutMindmap, parseMindmapText, type MindLayoutNode } from "../../lib/mindmapParse";
 import { prefetchVoices, speakPodcastScript, stopSpeaking } from "../../lib/speech";
 import { humanizeChatError } from "../../lib/apiError";
-import { buildGammaHtmlFile, parseGammaDeckJson, triggerHtmlDownload } from "../../lib/gammaDeck";
+import { parseGammaDeckJson } from "../../lib/gammaDeck";
+import { buildGammaPptxBlob, triggerBlobDownload } from "../../lib/gammaDeckPptx";
 import { useAuth } from "../../context/AuthContext";
 import { MindmapView } from "./MindmapView";
 import { ProcessingOverlay } from "./ProcessingOverlay";
@@ -65,7 +66,7 @@ export function DocumentWorkspace({ document }: Props) {
   const [mindmapRoot, setMindmapRoot] = useState<MindLayoutNode | null>(null);
   const [mindmapLoading, setMindmapLoading] = useState(false);
   const [mindmapRaw, setMindmapRaw] = useState<string | null>(null);
-  const [presentationHtml, setPresentationHtml] = useState<string | null>(null);
+  const [presentationBlob, setPresentationBlob] = useState<Blob | null>(null);
   const [presentationErr, setPresentationErr] = useState<string | null>(null);
   const [presentationLoading, setPresentationLoading] = useState(false);
   const [podcastTone, setPodcastTone] = useState<PodcastTone>("popular");
@@ -181,26 +182,26 @@ export function DocumentWorkspace({ document }: Props) {
   const buildPresentation = async () => {
     if (!ready) return;
     setPresentationLoading(true);
-    setPresentationHtml(null);
+    setPresentationBlob(null);
     setPresentationErr(null);
     try {
       const raw = await generatePresentationDeckJson(ragIds, authFetch);
       const deck = parseGammaDeckJson(raw);
-      const html = buildGammaHtmlFile(deck);
-      setPresentationHtml(html);
-      triggerHtmlDownload(html, `${baseFilename()}-gamma.html`);
+      const blob = await buildGammaPptxBlob(deck);
+      setPresentationBlob(blob);
+      triggerBlobDownload(blob, `${baseFilename()}-gamma.pptx`);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Ошибка";
       setPresentationErr(humanizeChatError(msg));
-      setPresentationHtml(null);
+      setPresentationBlob(null);
     } finally {
       setPresentationLoading(false);
     }
   };
 
   const downloadPresentationAgain = () => {
-    if (!presentationHtml) return;
-    triggerHtmlDownload(presentationHtml, `${baseFilename()}-gamma.html`);
+    if (!presentationBlob) return;
+    triggerBlobDownload(presentationBlob, `${baseFilename()}-gamma.pptx`);
   };
 
   const buildMindmap = async () => {
@@ -626,9 +627,9 @@ export function DocumentWorkspace({ document }: Props) {
           {tab === "presentation" ? (
             <div style={styles.panel}>
               <p style={styles.muted}>
-                По тексту из RAG собирается готовый файл <strong>.html</strong> в духе Gamma: тёмный градиент, крупные
-                заголовки, мало текста на слайд. После генерации файл <strong>скачивается автоматически</strong> — откройте
-                его в браузере, листайте стрелками или пробелом; при необходимости «Печать» → PDF.
+                По тексту из RAG собирается файл <strong>.pptx</strong> (PowerPoint / Google Slides / LibreOffice) в духе
+                Gamma: тёмный фон, акцентная полоса, крупные заголовки. После генерации файл{" "}
+                <strong>скачивается автоматически</strong>.
               </p>
               <div style={styles.rowBetween}>
                 <h3 style={styles.panelTitle}>Презентация</h3>
@@ -641,23 +642,23 @@ export function DocumentWorkspace({ document }: Props) {
                   {presentationLoading ? "…" : "Создать и скачать"}
                 </button>
               </div>
-              {presentationLoading ? <p style={styles.muted}>Генерируем слайды и готовим файл…</p> : null}
+              {presentationLoading ? <p style={styles.muted}>Генерируем слайды и собираем PPTX…</p> : null}
               {presentationErr ? (
                 <p style={styles.tableErr} role="alert">
                   {presentationErr}
                 </p>
               ) : null}
-              {presentationHtml && !presentationLoading ? (
+              {presentationBlob && !presentationLoading ? (
                 <>
                   <div style={styles.gammaOk}>
-                    <strong>Готово.</strong> Файл уже сохранён в загрузки. Ниже — предпросмотр.
+                    <strong>Готово.</strong> Файл <code style={styles.codeSm}>.pptx</code> сохранён в загрузки — откройте в
+                    PowerPoint или загрузите в Google Презентации.
                   </div>
                   <div style={styles.tableActions}>
                     <button type="button" style={styles.genBtn} onClick={() => downloadPresentationAgain()}>
-                      Скачать снова (.html)
+                      Скачать снова (.pptx)
                     </button>
                   </div>
-                  <iframe title="Предпросмотр презентации" style={styles.gammaFrame} srcDoc={presentationHtml} sandbox="allow-scripts allow-same-origin" />
                 </>
               ) : !presentationLoading && !presentationErr ? (
                 <p style={styles.muted}>Нажмите «Создать и скачать» — браузер предложит файл презентации.</p>
@@ -1058,14 +1059,6 @@ const styles: Record<string, CSSProperties> = {
     border: "1px solid rgba(110, 231, 183, 0.25)",
     fontSize: "0.9rem",
     lineHeight: 1.45,
-  },
-  gammaFrame: {
-    width: "100%",
-    height: 420,
-    border: "1px solid var(--border)",
-    borderRadius: 12,
-    marginTop: 12,
-    background: "#0a0a0f",
   },
   tableWarn: {
     margin: "12px 0 0",

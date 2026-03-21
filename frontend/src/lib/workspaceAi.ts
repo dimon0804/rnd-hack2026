@@ -201,8 +201,8 @@ export async function generateMindmapText(documentIds: string[], authFetch: Auth
 }
 
 /**
- * JSON для HTML-презентации (стиль Gamma): только валидный JSON, без markdown и без пояснений до/после.
- * Клиент собирает .html и предлагает скачать.
+ * JSON для PPTX (стиль Gamma): только валидный JSON, без markdown и без пояснений до/после.
+ * Клиент собирает .pptx (pptxgenjs) и предлагает скачать.
  */
 export async function generatePresentationDeckJson(documentIds: string[], authFetch: AuthFetch): Promise<string> {
   const ctx = await contextFromDocuments(documentIds, authFetch);
