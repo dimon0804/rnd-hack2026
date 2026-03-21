@@ -38,6 +38,13 @@ class InMemoryVectorStore:
         self._tfidf_matrix = None  # sparse, только без эмбеддера
         self._embed_matrix: np.ndarray | None = None  # (n, dim), строки L2-нормированы
 
+    def stats(self) -> dict[str, int | str]:
+        """Сводка для демо-панели: размер индекса и режим поиска."""
+        n = len(self._chunks)
+        docs = len({c.document_id for c in self._chunks}) if n else 0
+        mode = "embeddings" if self._embed_matrix is not None else "tfidf"
+        return {"chunks_total": n, "documents_indexed": docs, "search_mode": mode}
+
     def replace_all_chunks(self, chunks: list[StoredChunk]) -> None:
         """Атомарно заменить весь индекс (например, загрузка из PostgreSQL)."""
         self._chunks = list(chunks)

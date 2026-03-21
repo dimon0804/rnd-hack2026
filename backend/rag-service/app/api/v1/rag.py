@@ -1,6 +1,8 @@
 import logging
 import os
+import re
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 from uuid import UUID
 
@@ -17,6 +19,64 @@ router = APIRouter()
 
 _DEFAULT_CHUNK = 700
 _DEFAULT_OVERLAP = 100
+
+
+def _sanitize_public_detail(msg: str, max_len: int = 360) -> str:
+    """Убираем типичные секреты и длинные пути из текста для демо-панели."""
+    if not msg:
+        return ""
+    s = " ".join(msg.strip().split())
+    s = re.sub(r"sk-[a-zA-Z0-9_-]{10,}", "sk-***", s)
+    s = re.sub(r"(?i)(Bearer\s+)[A-Za-z0-9._-]{12,}", r"\1***", s)
+    s = re.sub(r"postgres(ql)?://[^\s]+", "postgres://***", s)
+    s = re.sub(r"/[\w./\\-]{80,}", lambda m: m.group(0)[:24] + "…", s)
+    if len(s) > max_len:
+        s = s[: max_len - 1] + "…"
+    return s
+
+
+def _record_ingest_error(request: Request, detail: str) -> None:
+    request.app.state.rag_last_error = {
+        "message": _sanitize_public_detail(detail),
+        "at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def _clear_ingest_error(request: Request) -> None:
+    request.app.state.rag_last_error = None
+
+
+class RagStatusResponse(BaseModel):
+    """Публичная сводка для демо: без секретов, только метрики индекса."""
+
+    service: str = "rag-service"
+    status: str = "ok"
+    chunks_total: int = 0
+    documents_indexed: int = 0
+    search_mode: str = Field(description="tfidf | embeddings")
+    db_persist_enabled: bool = False
+    last_ingest_error: str | None = None
+    last_ingest_error_at: str | None = None
+
+
+@router.get("/status", response_model=RagStatusResponse)
+def rag_status(request: Request) -> RagStatusResponse:
+    """Живая сводка RAG для демо-режима (пайплайн не мок)."""
+    rag_service = request.app.state.rag_service
+    st = rag_service.index_stats()
+    err = getattr(request.app.state, "rag_last_error", None) or None
+    msg = at = None
+    if isinstance(err, dict):
+        msg = err.get("message")
+        at = err.get("at")
+    return RagStatusResponse(
+        chunks_total=int(st["chunks_total"]),
+        documents_indexed=int(st["documents_indexed"]),
+        search_mode=str(st["search_mode"]),
+        db_persist_enabled=bool(settings.rag_enable_db),
+        last_ingest_error=msg,
+        last_ingest_error_at=at,
+    )
 
 
 class IngestRequest(BaseModel):
@@ -43,13 +103,16 @@ def ingest(body: IngestRequest, request: Request) -> IngestResponse:
         full = (root / body.storage_path).resolve()
     except (OSError, ValueError) as e:
         logger.warning("Bad storage_path: %s", e)
+        _record_ingest_error(request, "Некорректный путь к файлу")
         return IngestResponse(status="failed", document_id=doc_id, detail="Некорректный путь к файлу")
 
     if not str(full).startswith(str(root)):
         logger.warning("Path traversal rejected: %s", body.storage_path)
+        _record_ingest_error(request, "Недопустимый путь к файлу")
         return IngestResponse(status="failed", document_id=doc_id, detail="Недопустимый путь")
 
     if not full.is_file():
+        _record_ingest_error(request, "Файл не найден на диске")
         return IngestResponse(status="failed", document_id=doc_id, detail="Файл не найден на диске")
 
     try:
@@ -57,10 +120,12 @@ def ingest(body: IngestRequest, request: Request) -> IngestResponse:
     except Exception as exc:  # noqa: BLE001
         logger.exception("Text extraction failed for %s", doc_id)
         d = f"Извлечение текста: {exc}"
+        _record_ingest_error(request, d[:500])
         return IngestResponse(status="failed", document_id=doc_id, detail=d[:500])
 
     text = text.strip()
     if not text:
+        _record_ingest_error(request, "В документе не найдено текста для индексации")
         return IngestResponse(
             status="failed",
             document_id=doc_id,
@@ -77,9 +142,12 @@ def ingest(body: IngestRequest, request: Request) -> IngestResponse:
         )
     except Exception as exc:  # noqa: BLE001
         logger.exception("Index failed for %s", doc_id)
-        return IngestResponse(status="failed", document_id=doc_id, detail=str(exc)[:500])
+        d = str(exc)[:500]
+        _record_ingest_error(request, d)
+        return IngestResponse(status="failed", document_id=doc_id, detail=d)
 
     logger.info("Indexed document_id=%s chunks=%s", doc_id, result.chunks_indexed)
+    _clear_ingest_error(request)
     return IngestResponse(
         status="indexed",
         document_id=doc_id,
