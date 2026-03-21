@@ -1,10 +1,10 @@
 /** Общая модель слайдов (Gamma-подобная логика: мало текста, чёткая структура). */
 
 export type GammaSlide =
-  | { type: "title"; title: string; subtitle: string }
-  | { type: "content"; title: string; bullets: string[] }
-  | { type: "section"; title: string; subtitle?: string }
-  | { type: "closing"; title: string; line?: string };
+  | { type: "title"; title: string; subtitle: string; image_hint?: string }
+  | { type: "content"; title: string; bullets: string[]; image_hint?: string }
+  | { type: "section"; title: string; subtitle?: string; image_hint?: string }
+  | { type: "closing"; title: string; line?: string; image_hint?: string };
 
 export type GammaDeck = { deck_title: string; slides: GammaSlide[] };
 
@@ -36,29 +36,35 @@ export function parseGammaDeckJson(raw: string): GammaDeck {
     if (!item || typeof item !== "object") continue;
     const s = item as Record<string, unknown>;
     const type = String(s.type ?? "").toLowerCase();
+    const imageHint =
+      s.image_hint != null && String(s.image_hint).trim() ? String(s.image_hint).trim().slice(0, 200) : undefined;
     if (type === "title") {
       slides.push({
         type: "title",
         title: String(s.title ?? "").trim() || deck_title,
         subtitle: String(s.subtitle ?? "").trim() || " ",
+        ...(imageHint ? { image_hint: imageHint } : {}),
       });
     } else if (type === "content") {
       slides.push({
         type: "content",
         title: String(s.title ?? "").trim() || "Слайд",
         bullets: normalizeBullets(s.bullets),
+        ...(imageHint ? { image_hint: imageHint } : {}),
       });
     } else if (type === "section") {
       slides.push({
         type: "section",
         title: String(s.title ?? "").trim() || "Раздел",
         subtitle: s.subtitle != null ? String(s.subtitle).trim() : undefined,
+        ...(imageHint ? { image_hint: imageHint } : {}),
       });
     } else if (type === "closing") {
       slides.push({
         type: "closing",
         title: String(s.title ?? "").trim() || "Спасибо",
         line: s.line != null ? String(s.line).trim() : undefined,
+        ...(imageHint ? { image_hint: imageHint } : {}),
       });
     }
   }

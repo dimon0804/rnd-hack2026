@@ -9,7 +9,7 @@ const MAX_CTX = 12000;
 const PLAIN_TEXT_RULE =
   "Пиши обычным текстом для человека. Запрещено markdown: не используй #, ##, **, __, обратные кавычки для выделения.";
 
-type AuthFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+export type AuthFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
 /** Чанки из RAG: сначала полный список по документу, иначе TF-IDF; ошибки сети не рвут поток. */
 async function fetchMergedChunks(documentId: string, authFetch: AuthFetch): Promise<RagChunk[]> {
@@ -229,10 +229,12 @@ export async function generatePresentationDeckJson(documentIds: string[], authFe
 }
 
 Элементы slides — объекты с полем "type":
-- "title" — первый слайд: { "type": "title", "title": "...", "subtitle": "цель или подзаголовок в 1–2 предложения" }
-- "section" — разделитель раздела (опционально 1–2 шт): { "type": "section", "title": "...", "subtitle": "опционально" }
-- "content" — основной контент: { "type": "content", "title": "заголовок слайда", "bullets": ["тезис 1", "тезис 2", ...] } — 2–4 тезиса, короткие фразы
-- "closing" — финал: { "type": "closing", "title": "Выводы или Спасибо за внимание", "line": "опционально одна строка призыва" }
+- "title" — первый слайд: { "type": "title", "title": "...", "subtitle": "...", "image_hint": "english stock photo search phrase" }
+- "section" — разделитель: { "type": "section", "title": "...", "subtitle": "опционально", "image_hint": "..." }
+- "content" — основной контент: { "type": "content", "title": "...", "bullets": ["..."], "image_hint": "..." } — 2–4 тезиса
+- "closing" — финал: { "type": "closing", "title": "...", "line": "опционально", "image_hint": "..." }
+
+Обязательно для КАЖДОГО слайда поле "image_hint": одна английская фраза — это ТОТ ЖЕ запрос, по которому в стоке ищут фото (Pexels/Openverse), поэтому фраза должна по смыслу совпадать с заголовком и тезисами слайда. 5–14 слов, латиница, без кавычек внутри. Если заголовок слайда на русском — всё равно опиши сцену по-английски и включи соответствующие термины (например для «аппаратные ресурсы», IRQ/DMA: "close-up computer motherboard with cpu and capacitors technician workshop"). Не абстрактные слова вроде "business success", а что увидит зритель. Разные слайды — разные сцены. Для технических тем — платы, кабели, дата-центр, осциллограф, серверная; не предлагай животных, мемы, статуи, еду, туристические пейзажи без связи со слайдом.
 
 Всего 8–14 слайдов (включая title и closing). Логичная последовательность; без дублирования.
 ${multi ? "Несколько связанных документов — логично сгруппируй слайды по темам." : ""}

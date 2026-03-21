@@ -41,6 +41,9 @@ class Settings(BaseSettings):
         alias="DOCUMENT_SERVICE_URL",
     )
 
+    # Бесплатный ключ: https://www.pexels.com/api/ — точнее подбирает фото по фразе image_hint.
+    pexels_api_key: str | None = Field(default=None, alias="PEXELS_API_KEY")
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def strip_origins(cls, v: str | list[str]) -> str | list[str]:

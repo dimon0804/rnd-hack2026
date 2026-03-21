@@ -13,6 +13,7 @@ from app.api.proxy_ai import router as proxy_ai_router
 from app.api.proxy_auth import router as proxy_auth_router
 from app.api.proxy_documents import router as proxy_documents_router
 from app.api.proxy_rag import router as proxy_rag_router
+from app.api.stock_image import router as stock_image_router
 from app.core.config import settings
 
 limiter = Limiter(key_func=get_remote_address)
@@ -57,6 +58,7 @@ def create_app() -> FastAPI:
     app.include_router(proxy_documents_router)
     app.include_router(proxy_rag_router)
     app.include_router(proxy_ai_router)
+    app.include_router(stock_image_router)
 
     @app.get("/")
     @limiter.limit(f"{settings.rate_limit_per_minute}/minute")

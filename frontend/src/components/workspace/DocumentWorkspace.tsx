@@ -187,7 +187,7 @@ export function DocumentWorkspace({ document }: Props) {
     try {
       const raw = await generatePresentationDeckJson(ragIds, authFetch);
       const deck = parseGammaDeckJson(raw);
-      const blob = await buildGammaPptxBlob(deck);
+      const blob = await buildGammaPptxBlob(deck, authFetch);
       setPresentationBlob(blob);
       triggerBlobDownload(blob, `${baseFilename()}-gamma.pptx`);
     } catch (e) {
