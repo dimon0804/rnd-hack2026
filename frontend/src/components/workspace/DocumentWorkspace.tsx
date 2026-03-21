@@ -7,6 +7,7 @@ import {
   generateFlashcards,
   generateMindmapText,
   generateOfficialReport,
+  generatePresentationDeckJson,
   generateStructuredTableCsv,
   generateSummaryAndTopics,
   runPodcastAction,
@@ -17,12 +18,24 @@ import {
 import { layoutMindmap, parseMindmapText, type MindLayoutNode } from "../../lib/mindmapParse";
 import { prefetchVoices, speakPodcastScript, stopSpeaking } from "../../lib/speech";
 import { humanizeChatError } from "../../lib/apiError";
+import { parseGammaDeckJson } from "../../lib/gammaDeck";
+import { buildGammaPptxBlob, triggerBlobDownload } from "../../lib/gammaDeckPptx";
 import { useAuth } from "../../context/AuthContext";
 import { MindmapView } from "./MindmapView";
 import { ProcessingOverlay } from "./ProcessingOverlay";
 import { SttChatToolbar } from "../SttChatToolbar";
 
-type Tab = "summary" | "simple" | "short" | "report" | "table" | "chat" | "tests" | "flashcards" | "mindmap";
+type Tab =
+  | "summary"
+  | "simple"
+  | "short"
+  | "report"
+  | "table"
+  | "chat"
+  | "tests"
+  | "flashcards"
+  | "presentation"
+  | "mindmap";
 
 type Msg = { role: "user" | "assistant"; content: string };
 
@@ -53,6 +66,9 @@ export function DocumentWorkspace({ document }: Props) {
   const [mindmapRoot, setMindmapRoot] = useState<MindLayoutNode | null>(null);
   const [mindmapLoading, setMindmapLoading] = useState(false);
   const [mindmapRaw, setMindmapRaw] = useState<string | null>(null);
+  const [presentationBlob, setPresentationBlob] = useState<Blob | null>(null);
+  const [presentationErr, setPresentationErr] = useState<string | null>(null);
+  const [presentationLoading, setPresentationLoading] = useState(false);
   const [podcastTone, setPodcastTone] = useState<PodcastTone>("popular");
   const [podcastPace, setPodcastPace] = useState<PodcastPace>("normal");
   const [podcastScript, setPodcastScript] = useState<string | null>(null);
@@ -159,6 +175,33 @@ export function DocumentWorkspace({ document }: Props) {
     } finally {
       setReportLoading(false);
     }
+  };
+
+  const baseFilename = () => document.original_filename.replace(/\.[^.]+$/, "") || "presentation";
+
+  const buildPresentation = async () => {
+    if (!ready) return;
+    setPresentationLoading(true);
+    setPresentationBlob(null);
+    setPresentationErr(null);
+    try {
+      const raw = await generatePresentationDeckJson(ragIds, authFetch);
+      const deck = parseGammaDeckJson(raw);
+      const blob = await buildGammaPptxBlob(deck, authFetch);
+      setPresentationBlob(blob);
+      triggerBlobDownload(blob, `${baseFilename()}-gamma.pptx`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Ошибка";
+      setPresentationErr(humanizeChatError(msg));
+      setPresentationBlob(null);
+    } finally {
+      setPresentationLoading(false);
+    }
+  };
+
+  const downloadPresentationAgain = () => {
+    if (!presentationBlob) return;
+    triggerBlobDownload(presentationBlob, `${baseFilename()}-gamma.pptx`);
   };
 
   const buildMindmap = async () => {
@@ -325,6 +368,7 @@ export function DocumentWorkspace({ document }: Props) {
                 ["chat", "Чат"],
                 ["tests", "Тесты"],
                 ["flashcards", "Карточки"],
+                ["presentation", "Презентация"],
                 ["mindmap", "Mindmap"],
               ] as const
             ).map(([id, label]) => (
@@ -580,6 +624,48 @@ export function DocumentWorkspace({ document }: Props) {
             </div>
           ) : null}
 
+          {tab === "presentation" ? (
+            <div style={styles.panel}>
+              <p style={styles.muted}>
+                По тексту из RAG собирается файл <strong>.pptx</strong> (PowerPoint / Google Slides / LibreOffice) в духе
+                Gamma: тёмный фон, акцентная полоса, крупные заголовки. После генерации файл{" "}
+                <strong>скачивается автоматически</strong>.
+              </p>
+              <div style={styles.rowBetween}>
+                <h3 style={styles.panelTitle}>Презентация</h3>
+                <button
+                  type="button"
+                  style={styles.genBtn}
+                  disabled={!ready || presentationLoading}
+                  onClick={() => void buildPresentation()}
+                >
+                  {presentationLoading ? "…" : "Создать и скачать"}
+                </button>
+              </div>
+              {presentationLoading ? <p style={styles.muted}>Генерируем слайды и собираем PPTX…</p> : null}
+              {presentationErr ? (
+                <p style={styles.tableErr} role="alert">
+                  {presentationErr}
+                </p>
+              ) : null}
+              {presentationBlob && !presentationLoading ? (
+                <>
+                  <div style={styles.gammaOk}>
+                    <strong>Готово.</strong> Файл <code style={styles.codeSm}>.pptx</code> сохранён в загрузки — откройте в
+                    PowerPoint или загрузите в Google Презентации.
+                  </div>
+                  <div style={styles.tableActions}>
+                    <button type="button" style={styles.genBtn} onClick={() => downloadPresentationAgain()}>
+                      Скачать снова (.pptx)
+                    </button>
+                  </div>
+                </>
+              ) : !presentationLoading && !presentationErr ? (
+                <p style={styles.muted}>Нажмите «Создать и скачать» — браузер предложит файл презентации.</p>
+              ) : null}
+            </div>
+          ) : null}
+
           {tab === "mindmap" ? (
             <div className="tab-panel">
               <div style={styles.rowBetween}>
@@ -676,6 +762,17 @@ export function DocumentWorkspace({ document }: Props) {
                 пакетов.
               </p>
             </div>
+            <button
+              type="button"
+              style={styles.quickBtn}
+              disabled={!ready || presentationLoading}
+              onClick={() => {
+                setTab("presentation");
+                void buildPresentation();
+              }}
+            >
+              {presentationLoading ? "Презентация…" : "Презентация (слайды)"}
+            </button>
             <button
               type="button"
               style={styles.quickBtn}
@@ -960,6 +1057,15 @@ const styles: Record<string, CSSProperties> = {
   },
   tableActions: { display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12, marginTop: 12 },
   tableErr: { color: "var(--danger)", fontSize: "0.9rem", marginTop: 8 },
+  gammaOk: {
+    marginTop: 12,
+    padding: "12px 14px",
+    borderRadius: 10,
+    background: "rgba(110, 231, 183, 0.1)",
+    border: "1px solid rgba(110, 231, 183, 0.25)",
+    fontSize: "0.9rem",
+    lineHeight: 1.45,
+  },
   tableWarn: {
     margin: "12px 0 0",
     padding: 12,

@@ -26,13 +26,14 @@ docker/
 ```bash
 cp .env.example .env
 # задайте SECRET_KEY, JWT_SECRET_KEY, при необходимости MISTRAL_API_KEY
+# для релевантных фото в PPTX презентации: бесплатный ключ Pexels → PEXELS_API_KEY в `.env` (см. https://www.pexels.com/api/ )
 
 docker compose up -d --build
 ```
 
 - API Gateway: `http://localhost:8000` (напрямую) или через Nginx: `http://localhost`
 - document-service (напрямую): `http://localhost:8002` · rag-service: `http://localhost:8003` · ai-service: `http://localhost:8004`
-- **Frontend без локального Node:** `docker compose --profile dev up -d --build` → UI на **`http://localhost:3000`** (прокси на `api-gateway` внутри сети Docker). Образ монтирует папку `./frontend` с хоста — изменения в коде подхватываются Vite без пересборки; после смены **зависимостей** (`package.json`) пересоберите образ: `docker compose --profile dev build --no-cache frontend` и при необходимости удалите volume `frontend_node_modules` (`docker volume rm rnd-hack26_frontend_node_modules` или имя из `docker volume ls`).
+- **Frontend без локального Node:** `docker compose --profile dev up -d --build` → UI на **`http://localhost:3000`** (прокси на `api-gateway` внутри сети Docker). Образ монтирует папку `./frontend` с хоста — изменения в коде подхватываются Vite без пересборки. Том `frontend_node_modules` отделён от кода: при старте контейнера, если хэш `package-lock.json` не совпадает с сохранённым в томе, автоматически выполняется **`npm ci`** (подтягиваются новые пакеты, например `pptxgenjs`). Если зависимости всё ещё не те — пересоберите образ и при необходимости удалите том: `docker compose --profile dev build --no-cache frontend` и `docker volume rm <имя_тома_frontend_node_modules>` (см. `docker volume ls`).
 - **Важно:** стандартный `docker compose up -d` **без** `--profile dev` **не поднимает** контейнер фронта. UI на порту **80** (Nginx) сейчас проксирует только **API**, не React — открывайте **`http://localhost:3000`** с включённым профилем `dev`.
 - **Frontend с локальным npm:** установите [Node.js LTS](https://nodejs.org/) или `winget install OpenJS.NodeJS.LTS`. В PowerShell: **`. .\tools\use-node-path.ps1`** (dot-source — иначе `node` не попадёт в PATH для postinstall-скриптов), затем `cd frontend && npm ci && npm run dev`. Новые терминалы в Cursor/VS Code подхватывают [`.vscode/settings.json`](.vscode/settings.json).
 - Adminer: `http://localhost:8080` (сервер `postgres`, пользователь/БД из `.env`)
@@ -57,7 +58,7 @@ docker compose up -d --build
 
 ## Текущий этап
 
-- **api-gateway:** прокси на `/api/v1/auth/*`, `/api/v1/documents/*`, `/api/v1/rag/*`, `/api/v1/ai/*`
+- **api-gateway:** прокси на `/api/v1/auth/*`, `/api/v1/documents/*`, `/api/v1/rag/*`, `/api/v1/ai/*`; `GET /api/v1/stock-image/photo` — стоковое фото по поисковой фразе (Pexels при `PEXELS_API_KEY`, иначе Openverse, затем Picsum)
 - **auth-service:** JWT, register / login / refresh / logout
 - **document-service:** загрузка PDF/DOCX/PPTX/TXT, метаданные в БД, вызов **rag** `ingest` после сохранения
 - **rag-service:** `ingest` — извлечение текста (pypdf / python-docx / **python-pptx** / TXT), чанкинг (**LangChain** `RecursiveCharacterTextSplitter` или **LlamaIndex** `SentenceSplitter`, см. `RAG_CHUNKER` в `.env.example`); **чанки в PostgreSQL**; поиск — **TF-IDF** или **эмбеддер** (`EMBEDDER_BASE_URL`); `index` / `query`

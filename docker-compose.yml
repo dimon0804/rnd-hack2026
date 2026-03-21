@@ -151,6 +151,7 @@ services:
     environment:
       ENVIRONMENT: ${ENVIRONMENT:-development}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost,http://127.0.0.1:3000}
+      PEXELS_API_KEY: ${PEXELS_API_KEY:-}
       RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-120}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       AUTH_SERVICE_URL: ${AUTH_SERVICE_URL:-http://auth-service:8001}

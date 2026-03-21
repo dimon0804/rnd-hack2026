@@ -6,6 +6,9 @@ const proxyTarget =
 
 export default defineConfig({
   plugins: [react()],
+  optimizeDeps: {
+    include: ["pptxgenjs"],
+  },
   server: {
     port: 3000,
     host: true,
