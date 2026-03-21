@@ -7,6 +7,7 @@ import {
   generateFlashcards,
   generateMindmapText,
   generateOfficialReport,
+  generatePresentationOutline,
   generateStructuredTableCsv,
   generateSummaryAndTopics,
   runPodcastAction,
@@ -22,7 +23,17 @@ import { MindmapView } from "./MindmapView";
 import { ProcessingOverlay } from "./ProcessingOverlay";
 import { SttChatToolbar } from "../SttChatToolbar";
 
-type Tab = "summary" | "simple" | "short" | "report" | "table" | "chat" | "tests" | "flashcards" | "mindmap";
+type Tab =
+  | "summary"
+  | "simple"
+  | "short"
+  | "report"
+  | "table"
+  | "chat"
+  | "tests"
+  | "flashcards"
+  | "presentation"
+  | "mindmap";
 
 type Msg = { role: "user" | "assistant"; content: string };
 
@@ -53,6 +64,8 @@ export function DocumentWorkspace({ document }: Props) {
   const [mindmapRoot, setMindmapRoot] = useState<MindLayoutNode | null>(null);
   const [mindmapLoading, setMindmapLoading] = useState(false);
   const [mindmapRaw, setMindmapRaw] = useState<string | null>(null);
+  const [presentationText, setPresentationText] = useState<string | null>(null);
+  const [presentationLoading, setPresentationLoading] = useState(false);
   const [podcastTone, setPodcastTone] = useState<PodcastTone>("popular");
   const [podcastPace, setPodcastPace] = useState<PodcastPace>("normal");
   const [podcastScript, setPodcastScript] = useState<string | null>(null);
@@ -159,6 +172,32 @@ export function DocumentWorkspace({ document }: Props) {
     } finally {
       setReportLoading(false);
     }
+  };
+
+  const buildPresentation = async () => {
+    if (!ready) return;
+    setPresentationLoading(true);
+    setPresentationText(null);
+    try {
+      const t = await generatePresentationOutline(ragIds, authFetch);
+      setPresentationText(t);
+    } catch (e) {
+      setPresentationText(humanizeChatError(e instanceof Error ? e.message : "Ошибка"));
+    } finally {
+      setPresentationLoading(false);
+    }
+  };
+
+  const downloadPresentationTxt = () => {
+    if (presentationText === null || presentationText.trim() === "") return;
+    const base = document.original_filename.replace(/\.[^.]+$/, "") || "presentation";
+    const blob = new Blob([`\ufeff${presentationText}`], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = window.document.createElement("a");
+    a.href = url;
+    a.download = `${base}-slides.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   const buildMindmap = async () => {
@@ -325,6 +364,7 @@ export function DocumentWorkspace({ document }: Props) {
                 ["chat", "Чат"],
                 ["tests", "Тесты"],
                 ["flashcards", "Карточки"],
+                ["presentation", "Презентация"],
                 ["mindmap", "Mindmap"],
               ] as const
             ).map(([id, label]) => (
@@ -580,6 +620,47 @@ export function DocumentWorkspace({ document }: Props) {
             </div>
           ) : null}
 
+          {tab === "presentation" ? (
+            <div style={styles.panel}>
+              <p style={styles.muted}>
+                По тексту из индекса RAG формируется структура слайдов (заголовки и тезисы). Перенесите в PowerPoint или
+                Google Презентации, оформите шаблон по вкусу. Можно скачать как .txt.
+              </p>
+              <div style={styles.rowBetween}>
+                <h3 style={styles.panelTitle}>Презентация</h3>
+                <button
+                  type="button"
+                  style={styles.genBtn}
+                  disabled={!ready || presentationLoading}
+                  onClick={() => void buildPresentation()}
+                >
+                  {presentationLoading ? "…" : "Создать по тексту"}
+                </button>
+              </div>
+              {presentationLoading ? <p style={styles.muted}>Генерируем структуру слайдов…</p> : null}
+              {presentationText !== null ? (
+                <>
+                  <pre style={styles.pre}>{presentationText}</pre>
+                  <div style={styles.tableActions}>
+                    <button
+                      type="button"
+                      style={{
+                        ...styles.genBtn,
+                        ...(presentationText.trim() === "" ? styles.tableBtnDisabled : {}),
+                      }}
+                      disabled={presentationText.trim() === ""}
+                      onClick={() => downloadPresentationTxt()}
+                    >
+                      Скачать .txt
+                    </button>
+                  </div>
+                </>
+              ) : !presentationLoading ? (
+                <p style={styles.muted}>Нажмите «Создать по тексту».</p>
+              ) : null}
+            </div>
+          ) : null}
+
           {tab === "mindmap" ? (
             <div style={styles.panel}>
               <div style={styles.rowBetween}>
@@ -676,6 +757,17 @@ export function DocumentWorkspace({ document }: Props) {
                 пакетов.
               </p>
             </div>
+            <button
+              type="button"
+              style={styles.quickBtn}
+              disabled={!ready || presentationLoading}
+              onClick={() => {
+                setTab("presentation");
+                void buildPresentation();
+              }}
+            >
+              {presentationLoading ? "Презентация…" : "Презентация (слайды)"}
+            </button>
             <button
               type="button"
               style={styles.quickBtn}

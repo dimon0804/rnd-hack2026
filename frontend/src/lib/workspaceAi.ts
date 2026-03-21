@@ -200,6 +200,37 @@ export async function generateMindmapText(documentIds: string[], authFetch: Auth
   return res.content.trim();
 }
 
+/** Структура слайдов по тексту из RAG (для переноса в PowerPoint / Google Slides вручную или через экспорт .txt). */
+export async function generatePresentationOutline(documentIds: string[], authFetch: AuthFetch): Promise<string> {
+  const ctx = await contextFromDocuments(documentIds, authFetch);
+  if (!ctx.trim()) {
+    return "Нет текста в индексе для формирования презентации. Проверьте статус документа.";
+  }
+  const multi = documentIds.length > 1;
+  const system = `Ты составитель структуры слайдов для устной презентации на русском. Только русский.
+${PLAIN_TEXT_RULE}
+Построй план презентации по материалу: 8–14 слайдов (не больше 14).
+${multi ? "Материал может объединять несколько связанных документов — логично сгруппируй слайды по темам.\n" : ""}
+Формат строго, каждый слайд отдельным блоком:
+
+СЛАЙД N
+ЗАГОЛОВОК: (одна короткая строка без двоеточия внутри)
+ТЕЗИСЫ:
+- (тезис)
+- (тезис)
+(1–4 тезиса на слайд)
+
+Первый слайд — название презентации и цель или вопрос доклада.
+Один из средних слайдов при необходимости — обзор структуры или ключевых блоков.
+Последний слайд — выводы; при уместности финальная строка «Спасибо за внимание» или призыв к действию.
+Не используй символы markdown (#, **).`;
+  const res = await aiChat(`Исходный текст:\n\n${ctx}`, system, authFetch, {
+    maxTokens: 2800,
+    temperature: 0.25,
+  });
+  return res.content;
+}
+
 export async function runQuickAction(
   kind: "simple" | "short" | "test",
   documentIds: string[],
