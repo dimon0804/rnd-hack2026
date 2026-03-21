@@ -4,8 +4,8 @@ from pydantic import BaseModel, Field
 class IndexDocumentRequest(BaseModel):
     document_id: str = Field(min_length=1, max_length=120)
     text: str = Field(min_length=10)
-    chunk_size: int = Field(default=700, ge=200, le=2000)
-    chunk_overlap: int = Field(default=100, ge=0, le=500)
+    chunk_size: int = Field(default=600, ge=200, le=2000)
+    chunk_overlap: int = Field(default=90, ge=0, le=500)
 
 
 class IndexDocumentResponse(BaseModel):

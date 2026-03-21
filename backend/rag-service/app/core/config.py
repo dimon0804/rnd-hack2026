@@ -30,8 +30,11 @@ class Settings(BaseSettings):
     embedder_batch_size: int = Field(default=32, ge=1, le=256, alias="EMBEDDER_BATCH_SIZE")
     embedder_timeout_seconds: float = Field(default=120.0, alias="EMBEDDER_TIMEOUT_SECONDS")
 
-    # Чанкинг: langchain (RecursiveCharacterTextSplitter), llama_index (SentenceSplitter), legacy (старое скользящее окно)
-    rag_chunker: Literal["langchain", "llama_index", "legacy"] = Field(default="langchain", alias="RAG_CHUNKER")
+    # Чанкинг: semantic (абзацы/предложения — меньше смешения тем), langchain, llama_index, legacy
+    rag_chunker: Literal["semantic", "langchain", "llama_index", "legacy"] = Field(
+        default="semantic",
+        alias="RAG_CHUNKER",
+    )
 
 
 @lru_cache

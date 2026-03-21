@@ -4,7 +4,7 @@
 
 **Форматы файлов при ingest:** PDF (`pypdf`), DOCX (`python-docx`), **PPTX** (`python-pptx` — текст слайдов и ячеек таблиц), TXT.
 
-**Чанкинг:** переменная **`RAG_CHUNKER`**: `langchain` (по умолчанию, `RecursiveCharacterTextSplitter` из **langchain-text-splitters**), `llama_index` (**LlamaIndex** `SentenceSplitter`), `legacy` (прежнее скользящее окно по символам).
+**Чанкинг:** переменная **`RAG_CHUNKER`**: **`semantic`** (по умолчанию — сначала абзацы, длинные абзацы режутся по предложениям; без склейки разных абзацев в один чанк), `langchain` (`RecursiveCharacterTextSplitter`), `llama_index` (**LlamaIndex** `SentenceSplitter`), `legacy` (скользящее окно по символам).
 
 - **По умолчанию** — **TF-IDF** (scikit-learn).
 - Если задан **`EMBEDDER_BASE_URL`** — запросы к OpenAI-совместимому **`POST /v1/embeddings`** (vLLM и т.п., напр. порт **6620**), релевантность — косинусное сходство по эмбеддингам чанков и запроса.

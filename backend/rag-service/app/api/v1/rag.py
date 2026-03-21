@@ -15,8 +15,8 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-_DEFAULT_CHUNK = 700
-_DEFAULT_OVERLAP = 100
+_DEFAULT_CHUNK = 600
+_DEFAULT_OVERLAP = 90
 
 
 class IngestRequest(BaseModel):
