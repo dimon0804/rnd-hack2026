@@ -30,6 +30,8 @@ class MistralClient:
             "temperature": body.temperature,
             "max_tokens": body.max_tokens,
         }
+        if body.json_mode:
+            payload["response_format"] = {"type": "json_object"}
 
         timeout = httpx.Timeout(settings.request_timeout_seconds)
         headers = {
@@ -45,6 +47,18 @@ class MistralClient:
                     status_code=status.HTTP_502_BAD_GATEWAY,
                     detail=f"LLM endpoint unreachable: {exc}",
                 ) from exc
+
+        # Часть OpenAI-совместимых прокси не знает response_format — повтор без json_mode.
+        if r.status_code in (400, 422) and body.json_mode and "response_format" in payload:
+            payload.pop("response_format", None)
+            async with httpx.AsyncClient(timeout=timeout) as http2:
+                try:
+                    r = await http2.post(url, json=payload, headers=headers)
+                except httpx.RequestError as exc:
+                    raise HTTPException(
+                        status_code=status.HTTP_502_BAD_GATEWAY,
+                        detail=f"LLM endpoint unreachable: {exc}",
+                    ) from exc
 
         if r.status_code >= 400:
             text = (r.text or "")[:800]
@@ -87,22 +101,34 @@ class MistralClient:
                 server_url=settings.mistral_base_url.rstrip("/"),
                 async_client=http,
             ) as mistral:
+                sdk_kwargs: dict = {
+                    "model": settings.mistral_chat_model,
+                    "messages": [
+                        {"role": "system", "content": body.system_prompt},
+                        {"role": "user", "content": body.prompt},
+                    ],
+                    "temperature": body.temperature,
+                    "max_tokens": body.max_tokens,
+                    "stream": False,
+                }
+                if body.json_mode:
+                    sdk_kwargs["response_format"] = {"type": "json_object"}
                 try:
-                    res = await mistral.chat.complete_async(
-                        model=settings.mistral_chat_model,
-                        messages=[
-                            {"role": "system", "content": body.system_prompt},
-                            {"role": "user", "content": body.prompt},
-                        ],
-                        temperature=body.temperature,
-                        max_tokens=body.max_tokens,
-                        stream=False,
-                    )
+                    res = await mistral.chat.complete_async(**sdk_kwargs)
                 except Exception as exc:
-                    raise HTTPException(
-                        status_code=status.HTTP_502_BAD_GATEWAY,
-                        detail=f"Mistral API error: {exc}",
-                    ) from exc
+                    if not body.json_mode or "response_format" not in sdk_kwargs:
+                        raise HTTPException(
+                            status_code=status.HTTP_502_BAD_GATEWAY,
+                            detail=f"Mistral API error: {exc}",
+                        ) from exc
+                    sdk_kwargs.pop("response_format", None)
+                    try:
+                        res = await mistral.chat.complete_async(**sdk_kwargs)
+                    except Exception as exc2:
+                        raise HTTPException(
+                            status_code=status.HTTP_502_BAD_GATEWAY,
+                            detail=f"Mistral API error: {exc2}",
+                        ) from exc2
 
         choice = res.choices[0]
         msg = choice.message
