@@ -17,7 +17,7 @@ export function WorkspacePage() {
       setDoc(d);
       setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Ошибка загрузки");
+      setError(e instanceof Error ? e.message : "Не удалось загрузить документ.");
       setDoc(null);
     }
   }, [documentId, authFetch]);
@@ -54,13 +54,19 @@ export function WorkspacePage() {
 
   if (error) {
     return (
-      <main className="main main--wide" id="main" tabIndex={-1}>
-        <div className="callout callout--danger" style={{ maxWidth: 560 }}>
-          <strong>Ошибка</strong>
-          <p style={{ margin: "0.5rem 0 0" }}>{error}</p>
-          <Link to="/upload" className="btn-back-link" style={{ marginTop: 12, display: "inline-block" }}>
-            ← К загрузке
-          </Link>
+      <main className="main main--wide workspace-missing" id="main" tabIndex={-1}>
+        <div className="workspace-missing-wrap">
+          <p className="kick-label">Рабочая область</p>
+          <h1 className="page-title">Документ недоступен</h1>
+          <p className="workspace-missing-text">{error}</p>
+          <div className="not-found-actions">
+            <Link to="/upload" className="btn-solid btn-cta">
+              Мои документы
+            </Link>
+            <Link to="/" className="btn-outline btn-cta">
+              На главную
+            </Link>
+          </div>
         </div>
       </main>
     );

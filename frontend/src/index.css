@@ -3054,9 +3054,54 @@ select.input-select option {
   opacity: 0.85;
 }
 
+/* --- Страница «документ недоступен» (/workspace/:id) --- */
+.workspace-missing {
+  display: flex;
+  justify-content: center;
+  padding: clamp(2rem, 8vh, 4rem) clamp(1rem, 4vw, 2rem) 3rem;
+}
+
+.workspace-missing-wrap {
+  width: 100%;
+  max-width: 34rem;
+  text-align: center;
+  padding: clamp(1.5rem, 4vw, 2.25rem);
+  border-radius: calc(var(--radius) + 4px);
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  box-shadow: 0 20px 48px var(--accent-faint);
+  animation: workspace-missing-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes workspace-missing-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.workspace-missing .page-title {
+  margin-bottom: 0.75rem;
+}
+
+.workspace-missing-text {
+  margin: 0 0 1.5rem;
+  font-size: 1rem;
+  line-height: 1.6;
+  color: var(--muted);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .not-found-orbit,
   .not-found-moon {
+    animation: none;
+  }
+
+  .workspace-missing-wrap {
     animation: none;
   }
 }

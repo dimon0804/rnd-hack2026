@@ -23,6 +23,8 @@ export type BatchUploadResult = {
   groups_note: string;
 };
 
+import { humanizeDocumentsApiError, isDocumentIdFormatValid } from "../lib/apiError";
+
 function apiBase(): string {
   return import.meta.env.VITE_API_BASE ?? "";
 }
@@ -91,10 +93,15 @@ export async function getDocument(
   id: string,
   authFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>,
 ): Promise<DocumentItem> {
-  const res = await authFetch(`${apiBase()}/api/v1/documents/${id}`);
+  if (!isDocumentIdFormatValid(id)) {
+    throw new Error(
+      "Неверный идентификатор в адресе страницы. Откройте документ из списка «Мои документы» на странице загрузки.",
+    );
+  }
+  const res = await authFetch(`${apiBase()}/api/v1/documents/${encodeURIComponent(id)}`);
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(text || res.statusText);
+    throw new Error(humanizeDocumentsApiError(res.status, text));
   }
   return res.json() as Promise<DocumentItem>;
 }
