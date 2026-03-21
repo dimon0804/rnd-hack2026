@@ -447,7 +447,7 @@ export function DocumentWorkspace({ document }: Props) {
           </button>
         </aside>
 
-        <div className="workspace-center">
+        <div className={`workspace-center${tab === "chat" ? " workspace-center--chat" : ""}`}>
           <div className="tab-bar" role="tablist">
             {(
               [
@@ -614,44 +614,40 @@ export function DocumentWorkspace({ document }: Props) {
           ) : null}
 
           {tab === "chat" ? (
-            <div
-              className="tab-panel"
-              style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 360 }}
-            >
-              <p style={styles.chatHint}>
+            <div className="tab-panel tab-panel--chat">
+              <p className="chat-hint">
                 Вопросы только по этому файлу. Источники — внизу после ответа. 🎤 — загрузить аудио, 🎙️ — голосовое в
                 текст (STT через <code style={styles.codeSm}>STT_BASE_URL</code>, для хакатона часто порт{" "}
                 <strong>6640</strong>).
               </p>
-              <div className="chat-thread" style={{ maxHeight: 360 }}>
-                {messages.map((msg, i) => (
-                  <div
-                    key={i}
-                    className={`chat-bubble${msg.role === "user" ? " chat-bubble--user" : " chat-bubble--bot"}`}
-                  >
-                    <span className="chat-label">{msg.role === "user" ? "Вы" : "Ответ"}</span>
-                    <p>{msg.content}</p>
-                  </div>
-                ))}
-                {chatBusy ? <p style={styles.muted}>Ищем в документе…</p> : null}
-                <div ref={bottomRef} />
+              <div className="chat-scroll">
+                <div className="chat-thread">
+                  {messages.map((msg, i) => (
+                    <div
+                      key={i}
+                      className={`chat-bubble${msg.role === "user" ? " chat-bubble--user" : " chat-bubble--bot"}`}
+                    >
+                      <span className="chat-label">{msg.role === "user" ? "Вы" : "Ответ"}</span>
+                      <p>{msg.content}</p>
+                    </div>
+                  ))}
+                  {chatBusy ? <p style={styles.muted}>Ищем в документе…</p> : null}
+                  <div ref={bottomRef} />
+                </div>
+                {lastChunks.length > 0 ? (
+                  <details className="chat-sources" style={styles.sources}>
+                    <summary>Источники ({lastChunks.length} фрагментов)</summary>
+                    <ol style={styles.srcOl}>
+                      {lastChunks.map((c, i) => (
+                        <li key={`${c.chunk_id}-${i}`}>
+                          <span style={styles.srcMeta}>{(c.score * 100).toFixed(0)}%</span> {c.text.slice(0, 280)}…
+                        </li>
+                      ))}
+                    </ol>
+                  </details>
+                ) : null}
               </div>
-              {lastChunks.length > 0 ? (
-                <details style={styles.sources}>
-                  <summary>Источники ({lastChunks.length} фрагментов)</summary>
-                  <ol style={styles.srcOl}>
-                    {lastChunks.map((c, i) => (
-                      <li key={`${c.chunk_id}-${i}`}>
-                        <span style={styles.srcMeta}>{(c.score * 100).toFixed(0)}%</span> {c.text.slice(0, 280)}…
-                      </li>
-                    ))}
-                  </ol>
-                </details>
-              ) : null}
-              <div
-                className="composer"
-                style={{ marginTop: "auto", padding: "0.85rem 1.15rem 1.25rem", borderTop: "1px solid var(--border)" }}
-              >
+              <div className="chat-composer">
                 <SttChatToolbar
                   authFetch={authFetch}
                   disabled={chatBusy || !ready}
