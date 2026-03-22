@@ -8,7 +8,7 @@
 
 | Ожидание | Статус | Факт в проекте |
 |----------|--------|----------------|
-| **LangChain** | Используется | Чанкинг в `rag-service`: **`langchain-text-splitters`** — `RecursiveCharacterTextSplitter` (режим по умолчанию `RAG_CHUNKER=langchain`). |
+| **LangChain** | Используется | Чанкинг в `rag-service`: **`langchain-text-splitters`** — `RecursiveCharacterTextSplitter` (режим `RAG_CHUNKER=langchain`; по умолчанию **`semantic`** — абзацы/предложения, для длинных блоков тот же сплиттер). |
 | **LlamaIndex** | Используется | Альтернативный чанкинг: **`llama-index-core`** — `SentenceSplitter` при `RAG_CHUNKER=llama_index`. |
 | **PPTX (Python)** | Да | **`python-pptx`**: извлечение текста слайдов и таблиц в `rag-service/app/services/text_extract.py`; MIME разрешён в `document-service`; загрузка PPTX на фронте. |
 | **TTS Piper / Coqui** | Нет в Docker | Аудиопересказ: **Web Speech API** в браузере (`frontend/src/lib/speech.ts`). Для Piper/Coqui — отдельный контейнер и смена фронта на воспроизведение файла/стрима (roadmap). |
@@ -101,7 +101,7 @@ API через gateway, Bearer-токен; потоки: загрузка, RAG, 
 
 | Требование | Оценка |
 |------------|--------|
-| LangChain | Да (`RAG_CHUNKER=langchain`) |
+| LangChain | Да (`RAG_CHUNKER=langchain` или внутри `semantic`) |
 | LlamaIndex | Да (`RAG_CHUNKER=llama_index`) |
 | PPTX | Да |
 | Piper / Coqui TTS | Нет; Web Speech API |

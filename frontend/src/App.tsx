@@ -5,6 +5,7 @@ import { ChatPage } from "./pages/ChatPage";
 import { HomePage } from "./pages/HomePage";
 import { NotFoundPage } from "./pages/NotFoundPage";
 import { UploadPage } from "./pages/UploadPage";
+import { CabinetPage } from "./pages/CabinetPage";
 import { WorkspacePage } from "./pages/WorkspacePage";
 
 export function App() {
@@ -15,6 +16,7 @@ export function App() {
           <Route path="/" element={<HomePage />} />
           <Route path="/login" element={<AuthPage mode="login" />} />
           <Route path="/register" element={<AuthPage mode="register" />} />
+          <Route path="/cabinet" element={<CabinetPage />} />
           <Route path="/upload" element={<UploadPage />} />
           <Route path="/workspace/:documentId" element={<WorkspacePage />} />
           <Route path="/chat" element={<ChatPage />} />

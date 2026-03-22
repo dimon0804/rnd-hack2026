@@ -78,6 +78,53 @@ export type DocumentItem = {
   group_document_ids?: string[];
 };
 
+export type MimeTypeStat = {
+  mime_type: string;
+  label_ru: string;
+  count: number;
+  bytes_total: number;
+};
+
+export type TopicGroupMemberStat = {
+  document_id: string;
+  original_filename: string;
+  status: string;
+};
+
+export type TopicGroupStat = {
+  topic_group_id: string;
+  document_count: number;
+  total_bytes: number;
+  members: TopicGroupMemberStat[];
+};
+
+/** Сводка для личного кабинета (`GET /documents/stats`). */
+export type DocumentStats = {
+  total_documents: number;
+  total_bytes: number;
+  ready_count: number;
+  failed_count: number;
+  pending_or_processing_count: number;
+  mime_breakdown: MimeTypeStat[];
+  topic_groups_count: number;
+  documents_in_groups: number;
+  documents_standalone: number;
+  topic_groups: TopicGroupStat[];
+  first_upload_at: string | null;
+  last_upload_at: string | null;
+};
+
+export async function fetchDocumentStats(
+  authFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>,
+): Promise<DocumentStats> {
+  const res = await authFetch(`${apiBase()}/api/v1/documents/stats`);
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || res.statusText);
+  }
+  return res.json() as Promise<DocumentStats>;
+}
+
 export async function listDocuments(
   authFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>,
 ): Promise<DocumentItem[]> {

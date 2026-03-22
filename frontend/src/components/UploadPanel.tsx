@@ -20,6 +20,20 @@ function formatBytes(n: number): string {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function formatDocListDate(iso: string): string {
+  try {
+    return new Date(iso).toLocaleString("ru-RU", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return iso;
+  }
+}
+
 function statusBadgeClass(status: string): string {
   const s = status.trim().toLowerCase();
   if (s === "ready" || s === "indexed") return "status-ready";
@@ -154,7 +168,7 @@ export function UploadPanel() {
           </div>
         ) : null}
 
-        <div className="upload-layout">
+        <div className="upload-layout upload-layout--page">
           <section>
             <div
               className={`drop-zone${drag ? " is-drag" : ""}`}
@@ -190,7 +204,12 @@ export function UploadPanel() {
                 ⬆
               </span>
               <p className="drop-zone-title">{busy ? "Загрузка…" : "Перетащите файлы сюда"}</p>
-              <p className="drop-zone-sub">или нажмите — можно выбрать несколько (Ctrl/Shift)</p>
+              <p className="drop-zone-sub drop-zone-sub--desktop">
+                или нажмите — можно выбрать несколько (Ctrl/Shift)
+              </p>
+              <p className="drop-zone-sub drop-zone-sub--mobile">
+                или нажмите и выберите один или несколько файлов
+              </p>
               <p className="drop-zone-formats">PDF · DOCX · PPTX · TXT</p>
             </div>
 
@@ -270,21 +289,29 @@ export function UploadPanel() {
                   {pagedDocs.map((d) => (
                     <li key={d.id}>
                       <Link to={`/workspace/${d.id}`} className="doc-card" title={d.original_filename}>
-                        <span className="doc-card-name">
+                        <div className="doc-card-top">
+                          <span className="doc-card-name">
+                            {d.topic_group_id && (d.group_document_ids?.length ?? 0) > 1 ? (
+                              <span style={{ color: "var(--accent)" }} title="Один набор тем — чат по всем файлам группы">
+                                🔗{" "}
+                              </span>
+                            ) : null}
+                            {d.original_filename}
+                          </span>
+                          <span className={`status-badge ${statusBadgeClass(d.status)}`}>
+                            {documentStatusRu(d.status)}
+                          </span>
+                        </div>
+                        <div className="doc-card-meta">
+                          <span className="doc-card-meta-line">
+                            {formatBytes(d.size_bytes)} · {formatDocListDate(d.created_at)}
+                          </span>
                           {d.topic_group_id && (d.group_document_ids?.length ?? 0) > 1 ? (
-                            <span style={{ color: "var(--accent)" }} title="Один набор тем — чат по всем файлам группы">
-                              🔗{" "}
+                            <span className="doc-card-meta-line doc-card-meta-line--sub">
+                              Группа · {d.group_document_ids?.length} файлов
                             </span>
                           ) : null}
-                          {d.original_filename}
-                        </span>
-                        <span className="doc-card-meta">
-                          {formatBytes(d.size_bytes)} · {new Date(d.created_at).toLocaleString()}
-                          {d.topic_group_id && (d.group_document_ids?.length ?? 0) > 1 ? (
-                            <span> · группа {d.group_document_ids?.length} файлов</span>
-                          ) : null}
-                        </span>
-                        <span className={`status-badge ${statusBadgeClass(d.status)}`}>{documentStatusRu(d.status)}</span>
+                        </div>
                       </Link>
                     </li>
                   ))}

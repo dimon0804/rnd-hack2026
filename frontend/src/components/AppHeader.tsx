@@ -1,4 +1,5 @@
-import { Link } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Link, useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { useTheme } from "../context/ThemeContext";
 import { truncateEmail } from "../lib/truncateEmail";
@@ -7,6 +8,12 @@ import { MoonIcon, SunIcon } from "./ThemeIcons";
 export function AppHeader() {
   const { email, isAuthenticated, isHydrated, logout } = useAuth();
   const { theme, toggleTheme } = useTheme();
+  const location = useLocation();
+  const [navOpen, setNavOpen] = useState(false);
+
+  useEffect(() => {
+    setNavOpen(false);
+  }, [location.pathname]);
 
   return (
     <header className="site-header">
@@ -21,13 +28,32 @@ export function AppHeader() {
             <span className="brand-platform">platform</span>
           </span>
         </Link>
-        <nav className="nav" aria-label="Основная навигация">
+        <button
+          type="button"
+          className="nav-toggle"
+          aria-label={navOpen ? "Закрыть меню" : "Открыть меню"}
+          aria-expanded={navOpen}
+          aria-controls="primary-nav"
+          onClick={() => setNavOpen((o) => !o)}
+        >
+          <span className="nav-toggle__bar" aria-hidden />
+          <span className="nav-toggle__bar" aria-hidden />
+          <span className="nav-toggle__bar" aria-hidden />
+        </button>
+        <nav
+          id="primary-nav"
+          className={`nav${navOpen ? " nav--open" : ""}`}
+          aria-label="Основная навигация"
+        >
           {!isHydrated ? (
             <span className="header-placeholder" aria-hidden>
               …
             </span>
           ) : isAuthenticated ? (
             <>
+              <Link to="/cabinet" className="btn-text">
+                Кабинет
+              </Link>
               <Link to="/upload" className="btn-text">
                 Загрузка
               </Link>

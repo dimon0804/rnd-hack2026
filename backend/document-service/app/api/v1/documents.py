@@ -1,5 +1,6 @@
 import logging
 import uuid
+from datetime import datetime, timezone
 
 import httpx
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
@@ -14,7 +15,11 @@ from app.schemas.document import (
     BatchUploadItem,
     BatchUploadResponse,
     DocumentResponse,
+    DocumentStatsResponse,
     DocumentUploadResponse,
+    MimeTypeStat,
+    TopicGroupMemberStat,
+    TopicGroupStat,
 )
 from app.services.batch_upload import (
     ai_partition_topics,
@@ -32,6 +37,13 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 _MAX_BATCH_FILES = 15
+
+_MIME_LABEL_RU: dict[str, str] = {
+    "application/pdf": "PDF",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "Word (DOCX)",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": "PowerPoint (PPTX)",
+    "text/plain": "Текст (TXT)",
+}
 
 
 def _group_ids_for(db: Session, doc: Document) -> list[uuid.UUID]:
@@ -328,6 +340,123 @@ def list_documents(
         select(Document).where(Document.user_id == user_id).order_by(Document.created_at.desc()),
     ).all()
     return [build_document_response(db, d) for d in rows]
+
+
+@router.get("/stats", response_model=DocumentStatsResponse)
+def document_stats(
+    db: Session = Depends(get_db),
+    user_id: int | None = Depends(get_current_user_id_optional),
+) -> DocumentStatsResponse:
+    """Сводка по загруженным документам пользователя (личный кабинет)."""
+    if user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Войдите в аккаунт, чтобы открыть личный кабинет.",
+        )
+    rows = db.scalars(select(Document).where(Document.user_id == user_id)).all()
+    if not rows:
+        return DocumentStatsResponse(
+            total_documents=0,
+            total_bytes=0,
+            ready_count=0,
+            failed_count=0,
+            pending_or_processing_count=0,
+            mime_breakdown=[],
+            topic_groups_count=0,
+            documents_in_groups=0,
+            documents_standalone=0,
+            topic_groups=[],
+            first_upload_at=None,
+            last_upload_at=None,
+        )
+
+    total_bytes = sum(d.size_bytes for d in rows)
+
+    def _norm_status(s: str) -> str:
+        return (s or "").strip().lower()
+
+    ready_count = sum(1 for d in rows if _norm_status(d.status) == "ready")
+    failed_count = sum(1 for d in rows if _norm_status(d.status) == "failed")
+    pending_or_processing_count = sum(
+        1 for d in rows if _norm_status(d.status) not in ("ready", "failed")
+    )
+
+    by_mime: dict[str, tuple[int, int]] = {}
+    for d in rows:
+        mime = (d.mime_type or "").split(";")[0].strip().lower()
+        if not mime:
+            mime = "unknown"
+        cnt, bts = by_mime.get(mime, (0, 0))
+        by_mime[mime] = (cnt + 1, bts + d.size_bytes)
+
+    mime_breakdown = [
+        MimeTypeStat(
+            mime_type=m,
+            label_ru=_MIME_LABEL_RU.get(m, m if m != "unknown" else "Неизвестный тип"),
+            count=c,
+            bytes_total=b,
+        )
+        for m, (c, b) in sorted(by_mime.items(), key=lambda x: -x[1][0])
+    ]
+
+    gids = {d.topic_group_id for d in rows if d.topic_group_id is not None}
+    documents_in_groups = sum(1 for d in rows if d.topic_group_id is not None)
+    documents_standalone = sum(1 for d in rows if d.topic_group_id is None)
+
+    by_tg: dict[uuid.UUID, list[Document]] = {}
+    for d in rows:
+        if d.topic_group_id is None:
+            continue
+        by_tg.setdefault(d.topic_group_id, []).append(d)
+
+    _dt_min = datetime.min.replace(tzinfo=timezone.utc)
+    topic_groups_list: list[TopicGroupStat] = []
+    for tgid, members in by_tg.items():
+        members_sorted = sorted(
+            members,
+            key=lambda x: x.created_at if x.created_at is not None else _dt_min,
+        )
+        topic_groups_list.append(
+            TopicGroupStat(
+                topic_group_id=tgid,
+                document_count=len(members_sorted),
+                total_bytes=sum(m.size_bytes for m in members_sorted),
+                members=[
+                    TopicGroupMemberStat(
+                        document_id=m.id,
+                        original_filename=m.original_filename,
+                        status=m.status,
+                    )
+                    for m in members_sorted
+                ],
+            ),
+        )
+
+    def _group_latest(g: TopicGroupStat) -> datetime:
+        ms = by_tg[g.topic_group_id]
+        dates = [m.created_at for m in ms if m.created_at is not None]
+        return max(dates) if dates else _dt_min
+
+    topic_groups_list.sort(key=_group_latest, reverse=True)
+
+    created = [d.created_at for d in rows if d.created_at is not None]
+    first_upload_at = min(created) if created else None
+    last_upload_at = max(created) if created else None
+
+    return DocumentStatsResponse(
+        total_documents=len(rows),
+        total_bytes=total_bytes,
+        ready_count=ready_count,
+        failed_count=failed_count,
+        pending_or_processing_count=pending_or_processing_count,
+        mime_breakdown=mime_breakdown,
+        topic_groups_count=len(gids),
+        documents_in_groups=documents_in_groups,
+        documents_standalone=documents_standalone,
+        topic_groups=topic_groups_list,
+        first_upload_at=first_upload_at,
+        last_upload_at=last_upload_at,
+    )
 
 
 @router.get("/{document_id}", response_model=DocumentResponse)
