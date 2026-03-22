@@ -283,6 +283,139 @@ export async function deleteCollection(
   }
 }
 
+/** Read-only ссылка на набор меток (коллекций). `viewer_role: owner` — при запросе с JWT владельца. */
+export type SharedCollectionView = {
+  title: string | null;
+  collections: { id: string; name: string }[];
+  documents: DocumentItem[];
+  viewer_role?: "viewer" | "owner";
+};
+
+export type CollectionShareSummary = {
+  id: string;
+  title: string | null;
+  created_at: string;
+  revoked_at: string | null;
+  collection_ids: string[];
+};
+
+export type CollectionShareCreated = {
+  token: string;
+  url_path: string;
+};
+
+export async function createCollectionShare(
+  collectionIds: string[],
+  authFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>,
+  options?: { title?: string },
+): Promise<CollectionShareCreated> {
+  const res = await authFetch(`${apiBase()}/api/v1/documents/collections/share`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      collection_ids: collectionIds,
+      ...(options?.title?.trim() ? { title: options.title.trim() } : {}),
+    }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || res.statusText);
+  }
+  return res.json() as Promise<CollectionShareCreated>;
+}
+
+export async function listCollectionShares(
+  authFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>,
+): Promise<CollectionShareSummary[]> {
+  const res = await authFetch(`${apiBase()}/api/v1/documents/collections/shares`);
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || res.statusText);
+  }
+  return res.json() as Promise<CollectionShareSummary[]>;
+}
+
+export async function revokeCollectionShare(
+  token: string,
+  authFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>,
+): Promise<void> {
+  const res = await authFetch(`${apiBase()}/api/v1/documents/collections/shares/${encodeURIComponent(token)}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || res.statusText);
+  }
+}
+
+type AuthFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+
+/**
+ * Просмотр общей коллекции. С `authFetch` бэкенд вернёт `viewer_role: "owner"`, если вы владелец ссылки.
+ */
+export async function fetchSharedCollection(token: string, authFetch?: AuthFetch): Promise<SharedCollectionView> {
+  const url = `${apiBase()}/api/v1/documents/shared/${encodeURIComponent(token)}`;
+  const res = authFetch ? await authFetch(url, { method: "GET" }) : await fetch(url);
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || res.statusText);
+  }
+  return res.json() as Promise<SharedCollectionView>;
+}
+
+/** Скопировать файл из общей ссылки в «Мои документы» и проиндексировать (нужен JWT). */
+export async function importSharedDocument(
+  shareToken: string,
+  documentId: string,
+  authFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>,
+): Promise<DocumentItem> {
+  if (!isDocumentIdFormatValid(documentId)) {
+    throw new Error("Неверный идентификатор документа.");
+  }
+  const res = await authFetch(
+    `${apiBase()}/api/v1/documents/shared/${encodeURIComponent(shareToken)}/import/${encodeURIComponent(documentId)}`,
+    { method: "POST" },
+  );
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(humanizeDocumentsApiError(res.status, text));
+  }
+  return res.json() as Promise<DocumentItem>;
+}
+
+/** Скачать файл по read-only ссылке (без JWT). */
+export async function fetchSharedDocumentFileBlob(
+  token: string,
+  documentId: string,
+): Promise<{ blob: Blob; filename: string }> {
+  if (!isDocumentIdFormatValid(documentId)) {
+    throw new Error("Неверный идентификатор документа.");
+  }
+  const res = await fetch(
+    `${apiBase()}/api/v1/documents/shared/${encodeURIComponent(token)}/file/${encodeURIComponent(documentId)}`,
+    { method: "GET" },
+  );
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(humanizeDocumentsApiError(res.status, text));
+  }
+  const blob = await res.blob();
+  const cd = res.headers.get("Content-Disposition") ?? "";
+  let filename = "document";
+  const star = /filename\*=(?:UTF-8''|)([^;\s]+)/i.exec(cd);
+  const plain = /filename="([^"]+)"/i.exec(cd) || /filename=([^;\s]+)/i.exec(cd);
+  if (star?.[1]) {
+    try {
+      filename = decodeURIComponent(star[1].replace(/['"]/g, "").trim());
+    } catch {
+      filename = star[1].replace(/['"]/g, "").trim();
+    }
+  } else if (plain?.[1]) {
+    filename = plain[1].replace(/['"]/g, "").trim();
+  }
+  return { blob, filename: filename || "document" };
+}
+
 export async function setDocumentCollections(
   documentId: string,
   collectionIds: string[],

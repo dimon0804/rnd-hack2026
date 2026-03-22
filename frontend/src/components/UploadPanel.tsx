@@ -1,20 +1,26 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   createCollection,
+  createCollectionShare,
   deleteCollection,
+  listCollectionShares,
   listCollections,
   listDocuments,
+  revokeCollectionShare,
   setDocumentCollections,
   uploadDocument,
   uploadDocumentBatch,
   type BatchUploadResult,
   type CollectionItem,
+  type CollectionShareSummary,
   type DocumentItem,
   type DocumentUploadResult,
 } from "../api/documents";
 import { documentStatusRu } from "../lib/documentStatus";
 import { ProcessingOverlay } from "./workspace/ProcessingOverlay";
+import { ConfirmDialog } from "./ConfirmDialog";
+import { ShareLinkOpener } from "./ShareLinkOpener";
 import { useAuth } from "../context/AuthContext";
 
 const DOCS_PAGE_SIZE = 8;
@@ -50,6 +56,7 @@ function statusBadgeClass(status: string): string {
 
 export function UploadPanel() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { isAuthenticated, isHydrated, authFetch } = useAuth();
   const [drag, setDrag] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -64,6 +71,13 @@ export function UploadPanel() {
   const [collBusy, setCollBusy] = useState(false);
   /** Блокировка чекбоксов меток на время PATCH одного документа */
   const [patchingDocId, setPatchingDocId] = useState<string | null>(null);
+  const [teamShareCollIds, setTeamShareCollIds] = useState<string[]>([]);
+  const [teamShareTitle, setTeamShareTitle] = useState("");
+  const [teamShares, setTeamShares] = useState<CollectionShareSummary[] | null>(null);
+  const [teamShareBusy, setTeamShareBusy] = useState(false);
+  const [confirmDialog, setConfirmDialog] = useState<
+    null | { type: "revoke"; token: string } | { type: "deleteColl"; id: string }
+  >(null);
 
   const refreshList = useCallback(async () => {
     if (!isAuthenticated) {
@@ -90,14 +104,96 @@ export function UploadPanel() {
     }
   }, [isAuthenticated, authFetch]);
 
+  const refreshTeamShares = useCallback(async () => {
+    if (!isAuthenticated) {
+      setTeamShares(null);
+      return;
+    }
+    try {
+      setTeamShares(await listCollectionShares(authFetch));
+    } catch {
+      setTeamShares([]);
+    }
+  }, [isAuthenticated, authFetch]);
+
   useEffect(() => {
     if (!isHydrated || !isAuthenticated) return;
     void refreshList();
     void refreshCollections();
-  }, [isHydrated, isAuthenticated, refreshList, refreshCollections]);
+    void refreshTeamShares();
+  }, [isHydrated, isAuthenticated, refreshList, refreshCollections, refreshTeamShares]);
+
+  useEffect(() => {
+    const raw = searchParams.get("collections");
+    if (!raw) return;
+    const ids = raw.split(",").map((x) => x.trim()).filter(Boolean);
+    if (ids.length === 0) return;
+    setUploadCollectionIds(ids);
+  }, [searchParams]);
 
   const toggleUploadColl = (id: string) => {
     setUploadCollectionIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
+
+  const toggleTeamShareColl = (id: string) => {
+    setTeamShareCollIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
+
+  const onCreateTeamShare = async () => {
+    if (teamShareCollIds.length === 0 || teamShareBusy) return;
+    setTeamShareBusy(true);
+    setError(null);
+    try {
+      const created = await createCollectionShare(teamShareCollIds, authFetch, {
+        title: teamShareTitle.trim() || undefined,
+      });
+      const fullUrl = `${window.location.origin}${created.url_path}`;
+      await navigator.clipboard.writeText(fullUrl);
+      await refreshTeamShares();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Не удалось создать ссылку");
+    } finally {
+      setTeamShareBusy(false);
+    }
+  };
+
+  const runConfirmDialog = async () => {
+    if (!confirmDialog || teamShareBusy || collBusy) return;
+    if (confirmDialog.type === "revoke") {
+      const token = confirmDialog.token;
+      setTeamShareBusy(true);
+      setError(null);
+      try {
+        await revokeCollectionShare(token, authFetch);
+        await refreshTeamShares();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Не удалось отозвать");
+      } finally {
+        setTeamShareBusy(false);
+        setConfirmDialog(null);
+      }
+      return;
+    }
+    const id = confirmDialog.id;
+    setCollBusy(true);
+    setError(null);
+    try {
+      await deleteCollection(id, authFetch);
+      setUploadCollectionIds((prev) => prev.filter((x) => x !== id));
+      setTeamShareCollIds((prev) => prev.filter((x) => x !== id));
+      await refreshCollections();
+      await refreshList();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Не удалось удалить коллекцию");
+    } finally {
+      setCollBusy(false);
+      setConfirmDialog(null);
+    }
+  };
+
+  const copyShareUrl = (token: string) => {
+    const fullUrl = `${window.location.origin}/share/${token}`;
+    void navigator.clipboard.writeText(fullUrl);
   };
 
   const onCreateCollection = async () => {
@@ -116,21 +212,9 @@ export function UploadPanel() {
     }
   };
 
-  const onDeleteCollection = async (id: string) => {
+  const requestDeleteCollection = (id: string) => {
     if (collBusy) return;
-    if (!window.confirm("Удалить коллекцию? Документы останутся, связи с меткой снимутся.")) return;
-    setCollBusy(true);
-    setError(null);
-    try {
-      await deleteCollection(id, authFetch);
-      setUploadCollectionIds((prev) => prev.filter((x) => x !== id));
-      await refreshCollections();
-      await refreshList();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Не удалось удалить коллекцию");
-    } finally {
-      setCollBusy(false);
-    }
+    setConfirmDialog({ type: "deleteColl", id });
   };
 
   const onToggleDocCollection = async (doc: DocumentItem, collectionId: string, checked: boolean) => {
@@ -361,6 +445,8 @@ export function UploadPanel() {
                   </details>
                 </header>
 
+                <ShareLinkOpener variant="collections" />
+
                 <div className="collections-panel">
                   <h3 className="collections-panel__title">Новая метка</h3>
                   <div className="collections-create-row">
@@ -389,47 +475,162 @@ export function UploadPanel() {
                 </div>
 
                 {collections.length > 0 ? (
-                  <div className="collections-panel collections-panel--upload">
-                    <h3 className="collections-panel__title">Метки для следующей загрузки</h3>
-                    <p className="collections-panel__hint">Выбранные метки прикрепятся к файлам в зоне слева.</p>
-                    <div className="collections-chip-row" role="group" aria-label="Метки для загрузки">
-                      {collections.map((c) => {
-                        const on = uploadCollectionIds.includes(c.id);
-                        return (
-                          <div
-                            key={`up-${c.id}`}
-                            className={`collections-tag${on ? " collections-tag--selected" : ""}`}
-                          >
+                  <>
+                    <div className="collections-panel collections-panel--upload">
+                      <h3 className="collections-panel__title">Метки для следующей загрузки</h3>
+                      <p className="collections-panel__hint">Выбранные метки прикрепятся к файлам в зоне слева.</p>
+                      <div className="collections-chip-row" role="group" aria-label="Метки для загрузки">
+                        {collections.map((c) => {
+                          const on = uploadCollectionIds.includes(c.id);
+                          return (
+                            <div
+                              key={`up-${c.id}`}
+                              className={`collections-tag${on ? " collections-tag--selected" : ""}`}
+                            >
+                              <button
+                                type="button"
+                                className="collections-tag__filter"
+                                disabled={busy}
+                                onClick={() => toggleUploadColl(c.id)}
+                                aria-pressed={on}
+                              >
+                                <span className="collections-tag__signal" aria-hidden />
+                                <span className="collections-tag__label">{c.name}</span>
+                              </button>
+                              <button
+                                type="button"
+                                className="collections-tag__remove"
+                                disabled={collBusy}
+                                title={`Удалить коллекцию «${c.name}»`}
+                                aria-label={`Удалить коллекцию ${c.name}`}
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  void requestDeleteCollection(c.id);
+                                }}
+                              >
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+                                  <path d="M18 6L6 18M6 6l12 12" />
+                                </svg>
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <div className="collections-panel collections-panel--team-share">
+                      <div className="collections-team-share__head">
+                        <span className="collections-team-share__icon" aria-hidden>
+                          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+                            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+                          </svg>
+                        </span>
+                        <div>
+                          <h3 className="collections-panel__title collections-team-share__title">Общая ссылка для команды</h3>
+                          <p className="collections-panel__hint collections-team-share__lead">
+                            Read-only: по ссылке видны все файлы с выбранных меток. Загрузка и правки только у вас.
+                          </p>
+                        </div>
+                      </div>
+                      <div className="collections-chip-row collections-team-share__chips" role="group" aria-label="Метки для общей ссылки">
+                        {collections.map((c) => {
+                          const on = teamShareCollIds.includes(c.id);
+                          return (
                             <button
+                              key={`share-${c.id}`}
                               type="button"
-                              className="collections-tag__filter"
-                              disabled={busy}
-                              onClick={() => toggleUploadColl(c.id)}
+                              className={`collections-tag collections-tag--share${on ? " collections-tag--selected" : ""}`}
+                              disabled={teamShareBusy || busy}
+                              onClick={() => toggleTeamShareColl(c.id)}
                               aria-pressed={on}
                             >
                               <span className="collections-tag__signal" aria-hidden />
                               <span className="collections-tag__label">{c.name}</span>
                             </button>
-                            <button
-                              type="button"
-                              className="collections-tag__remove"
-                              disabled={collBusy}
-                              title={`Удалить коллекцию «${c.name}»`}
-                              aria-label={`Удалить коллекцию ${c.name}`}
-                              onClick={(e) => {
-                                e.preventDefault();
-                                void onDeleteCollection(c.id);
-                              }}
-                            >
-                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
-                                <path d="M18 6L6 18M6 6l12 12" />
-                              </svg>
-                            </button>
-                          </div>
-                        );
-                      })}
+                          );
+                        })}
+                      </div>
+                      <div className="collections-share-field">
+                        <label htmlFor="team-share-title" className="collections-share-field__label">
+                          Подпись к ссылке
+                          <span className="collections-share-field__optional">по желанию</span>
+                        </label>
+                        <div className="collections-share-field__shell">
+                          <input
+                            id="team-share-title"
+                            className="collections-share-field__input"
+                            type="text"
+                            placeholder="Например: Курс ML — неделя 3"
+                            value={teamShareTitle}
+                            disabled={teamShareBusy}
+                            onChange={(e) => setTeamShareTitle(e.target.value)}
+                            autoComplete="off"
+                            spellCheck={false}
+                          />
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        className="btn-solid btn-compact collections-share-btn"
+                        disabled={teamShareCollIds.length === 0 || teamShareBusy}
+                        onClick={() => void onCreateTeamShare()}
+                      >
+                        {teamShareBusy ? "…" : "Создать ссылку и скопировать"}
+                      </button>
+                      <p className="collections-panel__hint collections-panel__hint--after collections-team-share__footnote">
+                        После нажатия адрес копируется в буфер. Отозвать доступ — в списке ниже.
+                      </p>
                     </div>
-                  </div>
+
+                    {teamShares && teamShares.filter((s) => !s.revoked_at).length > 0 ? (
+                      <div className="collections-panel collections-panel--share-list">
+                        <h3 className="collections-panel__title">Активные ссылки</h3>
+                        <ul className="team-share-list">
+                          {teamShares
+                            .filter((s) => !s.revoked_at)
+                            .map((s) => (
+                              <li key={s.id} className="team-share-item">
+                                <div className="team-share-item__accent" aria-hidden />
+                                <div className="team-share-item__main">
+                                  <span className="team-share-item__title">{s.title?.trim() || "Без названия"}</span>
+                                  <span className="team-share-item__meta">
+                                    {s.collection_ids.map((cid) => collectionLabel(cid)).join(" · ")}
+                                  </span>
+                                </div>
+                                <div className="team-share-item__actions">
+                                  <button
+                                    type="button"
+                                    className="btn-solid btn-compact"
+                                    disabled={teamShareBusy}
+                                    onClick={() => navigate(`/share/${s.id}`)}
+                                    title="Открыть эту коллекцию у себя: рабочая область, метки"
+                                  >
+                                    У себя
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="btn-outline btn-compact"
+                                    disabled={teamShareBusy}
+                                    onClick={() => copyShareUrl(s.id)}
+                                  >
+                                    Копировать
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="btn-outline btn-compact"
+                                    disabled={teamShareBusy}
+                                    onClick={() => setConfirmDialog({ type: "revoke", token: s.id })}
+                                  >
+                                    Отозвать
+                                  </button>
+                                </div>
+                              </li>
+                            ))}
+                        </ul>
+                      </div>
+                    ) : null}
+                  </>
                 ) : (
                   <p className="collections-empty">Создайте метку выше — появятся быстрые переключатели для загрузки.</p>
                 )}
@@ -444,6 +645,7 @@ export function UploadPanel() {
                 onClick={() => {
                   void refreshList();
                   void refreshCollections();
+                  void refreshTeamShares();
                 }}
               >
                 Обновить
@@ -559,6 +761,23 @@ export function UploadPanel() {
           </aside>
         </div>
       </main>
+      <ConfirmDialog
+        open={confirmDialog !== null}
+        title={confirmDialog?.type === "revoke" ? "Отозвать ссылку?" : "Удалить метку?"}
+        message={
+          confirmDialog?.type === "revoke"
+            ? "По этому адресу коллекцию больше не откроют. При необходимости можно выдать новую ссылку."
+            : "Документы останутся, связи с этой меткой снимутся."
+        }
+        confirmLabel={confirmDialog?.type === "revoke" ? "Отозвать" : "Удалить метку"}
+        cancelLabel="Отмена"
+        variant="danger"
+        busy={teamShareBusy || collBusy}
+        onConfirm={runConfirmDialog}
+        onClose={() => {
+          if (!teamShareBusy && !collBusy) setConfirmDialog(null);
+        }}
+      />
     </>
   );
 }
