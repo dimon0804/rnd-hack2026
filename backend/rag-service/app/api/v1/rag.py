@@ -53,7 +53,7 @@ class RagStatusResponse(BaseModel):
     status: str = "ok"
     chunks_total: int = 0
     documents_indexed: int = 0
-    search_mode: str = Field(description="tfidf | embeddings")
+    search_mode: str = Field(description="tfidf | embeddings | hybrid")
     db_persist_enabled: bool = False
     last_ingest_error: str | None = None
     last_ingest_error_at: str | None = None
@@ -203,6 +203,7 @@ def query(body: QueryRequest, request: Request) -> QueryResponse:
         query_text=body.query,
         top_k=body.top_k,
         document_ids=body.document_ids,
+        search_mode=body.search_mode,
     )
 
 

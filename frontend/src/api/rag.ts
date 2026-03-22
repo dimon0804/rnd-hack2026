@@ -24,14 +24,18 @@ export type RagChunk = {
   text: string;
 };
 
+/** keyword — TF-IDF (точнее по словам); semantic — векторы при наличии эмбеддера, иначе TF-IDF. */
+export type RagSearchMode = "keyword" | "semantic";
+
 export async function ragQuery(
   query: string,
   authFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>,
   topK = 6,
   /** Только эти документы (обычно UUID ваших файлов с /api/v1/documents). */
   documentIds?: string[],
+  searchMode: RagSearchMode = "semantic",
 ): Promise<RagChunk[]> {
-  const body: Record<string, unknown> = { query, top_k: topK };
+  const body: Record<string, unknown> = { query, top_k: topK, search_mode: searchMode };
   if (documentIds !== undefined) {
     body.document_ids = documentIds;
   }
@@ -56,10 +60,11 @@ export async function ragQueryBalanced(
   authFetch: AuthFetch,
   topK: number,
   documentIds: string[],
+  searchMode: RagSearchMode = "semantic",
 ): Promise<RagChunk[]> {
   const ids = documentIds.filter(Boolean);
   if (ids.length <= 1) {
-    return ragQuery(query, authFetch, topK, ids.length === 1 ? ids : undefined);
+    return ragQuery(query, authFetch, topK, ids.length === 1 ? ids : undefined, searchMode);
   }
 
   const n = ids.length;
@@ -69,7 +74,7 @@ export async function ragQueryBalanced(
   const merged: RagChunk[] = [];
   const seen = new Set<string>();
   for (const docId of ids) {
-    const part = await ragQuery(query, authFetch, perDocK, [docId]);
+    const part = await ragQuery(query, authFetch, perDocK, [docId], searchMode);
     for (const c of part) {
       const key = `${c.document_id}:${c.chunk_id}`;
       if (seen.has(key)) continue;

@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -19,6 +21,10 @@ class QueryRequest(BaseModel):
     document_ids: list[str] | None = Field(
         default=None,
         description="Ограничить поиск чанками этих document_id (документы текущего пользователя).",
+    )
+    search_mode: Literal["keyword", "semantic"] = Field(
+        default="semantic",
+        description="keyword — TF-IDF (ключевые слова); semantic — эмбеддинги при EMBEDDER_BASE_URL, иначе TF-IDF.",
     )
 
 

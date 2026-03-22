@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { aiChat } from "../api/ai";
 import { listDocuments } from "../api/documents";
 import type { RagChunk } from "../api/rag";
-import { formatRagChunksForLlm, ragQuery, ragQueryBalanced } from "../api/rag";
+import { formatRagChunksForLlm, ragQuery, ragQueryBalanced, type RagSearchMode } from "../api/rag";
 import { humanizeChatError } from "../lib/apiError";
 import { formatBriefChatHistory } from "../lib/formatChatHistory";
 import {
@@ -66,6 +66,7 @@ export function ChatPanel() {
     err: string | null;
   }>({ data: null, loading: false, err: null });
   const [faqSuggestionsOpen, setFaqSuggestionsOpen] = useState(false);
+  const [ragSearchMode, setRagSearchMode] = useState<RagSearchMode>("semantic");
 
   useEffect(() => {
     if (input.trim().length > 0) {
@@ -156,8 +157,8 @@ export function ChatPanel() {
       const multi = indexedIds.length > 1;
       const topK = multi ? CHAT_TOPK_MULTI : CHAT_TOPK_SINGLE;
       let chunks = multi
-        ? await ragQueryBalanced(text, authFetch, topK, indexedIds)
-        : await ragQuery(text, authFetch, topK, indexedIds);
+        ? await ragQueryBalanced(text, authFetch, topK, indexedIds, ragSearchMode)
+        : await ragQuery(text, authFetch, topK, indexedIds, ragSearchMode);
       chunks = await hydrateChunkTextsFromDocuments(chunks, authFetch);
       setLastChunks(chunks);
       const systemPrompt = buildSystemPrompt(chunks, docNames, multi);
@@ -355,6 +356,34 @@ export function ChatPanel() {
           </details>
         ) : null}
 
+        <div style={styles.searchMode} role="radiogroup" aria-label="Режим поиска RAG">
+          <span style={styles.searchModeKicker}>Поиск</span>
+          <div style={styles.searchModeSegment}>
+            <button
+              type="button"
+              style={{
+                ...styles.searchModeBtn,
+                ...(ragSearchMode === "keyword" ? styles.searchModeBtnOn : {}),
+              }}
+              disabled={busy || sttBusy}
+              onClick={() => setRagSearchMode("keyword")}
+            >
+              Точное совпадение
+            </button>
+            <button
+              type="button"
+              style={{
+                ...styles.searchModeBtn,
+                ...(ragSearchMode === "semantic" ? styles.searchModeBtnOn : {}),
+              }}
+              disabled={busy || sttBusy}
+              onClick={() => setRagSearchMode("semantic")}
+            >
+              По смыслу
+            </button>
+          </div>
+        </div>
+
         <div style={styles.composer}>
           <SttChatToolbar
             authFetch={authFetch}
@@ -548,12 +577,43 @@ const styles: Record<string, CSSProperties> = {
   sourceLi: { marginBottom: 10 },
   sourceMeta: { fontSize: "0.75rem", opacity: 0.9 },
   sourceText: { margin: "4px 0 0", fontSize: "0.82rem", lineHeight: 1.45, color: "var(--text)" },
+  searchMode: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: "8px 12px",
+    padding: "10px 16px",
+    borderTop: "1px solid var(--border)",
+    background: "rgba(0,0,0,0.18)",
+  },
+  searchModeKicker: {
+    fontSize: "0.62rem",
+    fontWeight: 700,
+    letterSpacing: "0.08em",
+    textTransform: "uppercase",
+    color: "var(--muted)",
+  },
+  searchModeSegment: { display: "flex", gap: 0, borderRadius: 10, overflow: "hidden", border: "1px solid var(--border)" },
+  searchModeBtn: {
+    padding: "8px 14px",
+    border: "none",
+    background: "transparent",
+    color: "var(--muted)",
+    fontSize: "0.82rem",
+    fontWeight: 600,
+    cursor: "pointer",
+    fontFamily: "inherit",
+  },
+  searchModeBtnOn: {
+    background: "rgba(110, 231, 183, 0.12)",
+    color: "var(--text)",
+  },
   composer: {
     display: "flex",
     gap: 10,
     alignItems: "flex-end",
     padding: "14px 16px",
-    borderTop: "1px solid var(--border)",
+    borderTop: "1px solid color-mix(in srgb, var(--border) 70%, transparent)",
     background: "rgba(0,0,0,0.2)",
   },
   textarea: {

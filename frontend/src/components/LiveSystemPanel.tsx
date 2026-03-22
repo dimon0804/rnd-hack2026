@@ -18,6 +18,7 @@ function searchModeRu(mode: string): string {
   const m = mode.toLowerCase();
   if (m === "embeddings") return "эмбеддинги";
   if (m === "tfidf") return "TF‑IDF";
+  if (m === "hybrid") return "TF‑IDF + эмбеддинги";
   return mode;
 }
 

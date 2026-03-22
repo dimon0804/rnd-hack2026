@@ -19,9 +19,20 @@ class RagService:
                 self._chunk_repo.delete_document(document_id)
         return IndexDocumentResponse(document_id=document_id, chunks_indexed=count)
 
-    def query(self, query_text: str, top_k: int, document_ids: list[str] | None = None) -> QueryResponse:
+    def query(
+        self,
+        query_text: str,
+        top_k: int,
+        document_ids: list[str] | None = None,
+        search_mode: str = "semantic",
+    ) -> QueryResponse:
         allowed = set(document_ids) if document_ids is not None else None
-        rows = self._store.query(query=query_text, top_k=top_k, allowed_document_ids=allowed)
+        rows = self._store.query(
+            query=query_text,
+            top_k=top_k,
+            allowed_document_ids=allowed,
+            search_mode=search_mode,
+        )
         return QueryResponse(
             results=[
                 ChunkResult(
