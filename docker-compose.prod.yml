@@ -168,11 +168,12 @@ services:
     image: rnd-hack-nginx:${IMAGE_TAG:-latest}
     container_name: ai-platform-nginx
     restart: unless-stopped
+    environment:
+      DEPLOY_DOMAIN: ${DEPLOY_DOMAIN:-rnd-hack.clv-digital.tech}
     ports:
       - "80:80"
       - "443:443"
     volumes:
-      - ./docker/nginx/nginx.prod.conf:/etc/nginx/nginx.conf:ro
       - /etc/letsencrypt:/etc/letsencrypt:ro
       - /var/www/certbot:/var/www/certbot:ro
     depends_on:

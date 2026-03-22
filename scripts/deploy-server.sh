@@ -2,7 +2,7 @@
 # Деплой на Ubuntu/Debian: Docker, Let's Encrypt, docker compose prod.
 #
 # Перед запуском:
-#   1) DNS: A-запись ${DEPLOY_DOMAIN:-rnd-hack.clv-digital.tech} → IP сервера (например 158.160.121.110).
+#   1) DNS: A-запись ${DEPLOY_DOMAIN:-rnd-hack.clv-digital.tech} → IP сервера (например 194.113.106.149).
 #   2) export CERTBOT_EMAIL='your@email.com' — обязательно для первого выпуска сертификата.
 #   3) В .env задайте MISTRAL_API_KEY (и при необходимости EMBEDDER_*, STT_*).
 #
@@ -45,9 +45,9 @@ if [[ -z "${CERTBOT_EMAIL}" ]]; then
   die "Задайте CERTBOT_EMAIL, например: export CERTBOT_EMAIL=you@example.com"
 fi
 
-echo "==> Установка пакетов (git, ufw, certbot, gettext/envsubst)…"
+echo "==> Установка пакетов (git, ufw, certbot)…"
 $SUDO apt-get update -y
-$SUDO apt-get install -y ca-certificates curl git ufw certbot gettext-base
+$SUDO apt-get install -y ca-certificates curl git ufw certbot
 
 if ! command -v docker >/dev/null 2>&1; then
   echo "==> Установка Docker…"
@@ -108,10 +108,11 @@ if grep -qE '^MISTRAL_API_KEY=$|^MISTRAL_API_KEY=\s*$' .env 2>/dev/null || ! gre
   echo "ВНИМАНИЕ: в .env не задан MISTRAL_API_KEY — чат и AI не будут работать. Отредактируйте ${APP_DIR}/.env и перезапустите: docker compose -f docker-compose.prod.yml up -d" >&2
 fi
 
-export DEPLOY_DOMAIN
-echo "==> Генерация docker/nginx/nginx.prod.conf из шаблона…"
-need_cmd envsubst
-envsubst '${DEPLOY_DOMAIN}' < docker/nginx/nginx.prod.conf.template > docker/nginx/nginx.prod.conf
+if ! grep -q '^DEPLOY_DOMAIN=' .env 2>/dev/null; then
+  echo "DEPLOY_DOMAIN=${DEPLOY_DOMAIN}" >> .env
+else
+  sed -i.bak "s#^DEPLOY_DOMAIN=.*#DEPLOY_DOMAIN=${DEPLOY_DOMAIN}#" .env && rm -f .env.bak 2>/dev/null || true
+fi
 
 if [[ ! -f "/etc/letsencrypt/live/${DEPLOY_DOMAIN}/fullchain.pem" ]]; then
   echo "==> Выпуск сертификата Let's Encrypt (standalone, нужен свободный порт 80)…"

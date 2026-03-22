@@ -1,4 +1,4 @@
-# Сборка статики frontend + nginx (конфиг монтируется с хоста при запуске).
+# Сборка статики frontend + nginx. Конфиг собирается при старте из шаблона (DEPLOY_DOMAIN).
 FROM node:20-bookworm-slim AS frontend-build
 WORKDIR /app
 COPY frontend/package.json frontend/package-lock.json ./
@@ -9,4 +9,9 @@ ENV VITE_API_BASE=
 RUN npm run build
 
 FROM nginx:1.27-alpine
+RUN apk add --no-cache gettext
 COPY --from=frontend-build /app/dist /usr/share/nginx/html
+COPY docker/nginx/nginx.prod.conf.template /etc/nginx/templates/nginx.prod.conf.template
+COPY docker/nginx/docker-entrypoint-nginx.sh /docker-entrypoint-nginx.sh
+RUN sed -i 's/\r$//' /docker-entrypoint-nginx.sh && chmod +x /docker-entrypoint-nginx.sh
+ENTRYPOINT ["/docker-entrypoint-nginx.sh"]
