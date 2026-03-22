@@ -1,6 +1,14 @@
 import { useEffect, useState } from "react";
 import { Link, Navigate } from "react-router-dom";
-import { listDocuments, fetchDocumentStats, type DocumentItem, type DocumentStats } from "../api/documents";
+import {
+  fetchDocumentStats,
+  listCollections,
+  listDocuments,
+  type CollectionItem,
+  type DocumentItem,
+  type DocumentStats,
+} from "../api/documents";
+import { DocumentCollectionChips } from "../components/DocumentCollectionChips";
 import { useAuth } from "../context/AuthContext";
 import { formatBytes } from "../lib/formatBytes";
 
@@ -20,6 +28,7 @@ export function CabinetPage() {
   const { authFetch, isAuthenticated, isHydrated, email } = useAuth();
   const [stats, setStats] = useState<DocumentStats | null>(null);
   const [recent, setRecent] = useState<DocumentItem[]>([]);
+  const [collections, setCollections] = useState<CollectionItem[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -30,10 +39,15 @@ export function CabinetPage() {
     setErr(null);
     void (async () => {
       try {
-        const [s, docs] = await Promise.all([fetchDocumentStats(authFetch), listDocuments(authFetch)]);
+        const [s, docs, cols] = await Promise.all([
+          fetchDocumentStats(authFetch),
+          listDocuments(authFetch),
+          listCollections(authFetch),
+        ]);
         if (!cancelled) {
           setStats(s);
           setRecent(docs.slice(0, 12));
+          setCollections(cols);
         }
       } catch (e) {
         if (!cancelled) {
@@ -177,6 +191,11 @@ export function CabinetPage() {
                           <span className={`cabinet-status cabinet-status--${normStatus(m.status)}`}>
                             {m.status}
                           </span>
+                          <DocumentCollectionChips
+                            collectionIds={m.collection_ids}
+                            collections={collections}
+                            className="cabinet-topic-group__doc-coll-wrap"
+                          />
                         </li>
                       ))}
                     </ul>
@@ -221,6 +240,11 @@ export function CabinetPage() {
                       {_mimeShort(d.mime_type)} · {formatBytes(d.size_bytes)} ·{" "}
                       <span className={`cabinet-status cabinet-status--${normStatus(d.status)}`}>{d.status}</span>
                     </span>
+                    <DocumentCollectionChips
+                      collectionIds={d.collection_ids}
+                      collections={collections}
+                      className="cabinet-recent-coll"
+                    />
                   </li>
                 ))}
               </ul>

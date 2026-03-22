@@ -63,8 +63,8 @@ export async function ragQueryBalanced(
   }
 
   const n = ids.length;
-  const perDoc = Math.max(3, Math.ceil(topK / n));
-  const perDocK = Math.min(12, perDoc);
+  const perDoc = Math.max(4, Math.ceil(topK / n));
+  const perDocK = Math.min(16, perDoc);
 
   const merged: RagChunk[] = [];
   const seen = new Set<string>();
@@ -85,20 +85,32 @@ export async function ragQueryBalanced(
 export function formatRagChunksForLlm(
   chunks: RagChunk[],
   docLabel: (documentId: string) => string,
-  maxChars = 14000,
+  maxChars = 24000,
 ): string {
   const blocks: string[] = [];
   let total = 0;
+  const tailNote = "\n… (фрагмент сокращён из‑за лимита контекста)";
+
   for (let i = 0; i < chunks.length; i++) {
     const c = chunks[i];
     const name = docLabel(c.document_id);
-    const block = `--- [${i + 1}] Файл: ${name} — чанк #${c.chunk_id}, релевантность ~${Math.round(Math.min(1, Math.max(0, c.score)) * 100)}% ---\n${c.text}`;
-    if (total + block.length > maxChars) {
-      blocks.push("… [контекст обрезан по длине]");
-      break;
+    const header = `--- [${i + 1}] Файл: ${name} — чанк #${c.chunk_id}, релевантность ~${Math.round(Math.min(1, Math.max(0, c.score)) * 100)}% ---\n`;
+    const fullBlock = header + c.text;
+    if (total + fullBlock.length <= maxChars) {
+      blocks.push(fullBlock);
+      total += fullBlock.length;
+      continue;
     }
-    blocks.push(block);
-    total += block.length;
+    const room = maxChars - total - header.length - tailNote.length;
+    if (room > 400) {
+      blocks.push(header + c.text.slice(0, Math.max(0, room)) + tailNote);
+    }
+    if (i < chunks.length - 1) {
+      blocks.push(
+        "[Не все фрагменты вошли в лимит контекста — при необходимости уточните вопрос по разделу или термину.]",
+      );
+    }
+    break;
   }
   return blocks.join("\n\n");
 }

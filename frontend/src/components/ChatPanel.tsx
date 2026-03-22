@@ -5,13 +5,18 @@ import { listDocuments } from "../api/documents";
 import type { RagChunk } from "../api/rag";
 import { formatRagChunksForLlm, ragQuery, ragQueryBalanced } from "../api/rag";
 import { humanizeChatError } from "../lib/apiError";
+import { formatBriefChatHistory } from "../lib/formatChatHistory";
 import { hydrateChunkTextsFromDocuments } from "../lib/ragChunkHydrate";
 import { useAuth } from "../context/AuthContext";
 import { SttChatToolbar } from "./SttChatToolbar";
 
 type Msg = { role: "user" | "assistant"; content: string };
 
-const MAX_CONTEXT_CHARS = 12000;
+const MAX_CONTEXT_CHARS = 22000;
+const CHAT_TOPK_SINGLE = 10;
+const CHAT_TOPK_MULTI = 16;
+const CHAT_MAX_TOKENS = 2600;
+const CHAT_TEMPERATURE = 0.15;
 
 function isReady(d: { status: string }): boolean {
   return d.status.trim().toLowerCase() === "ready";
@@ -23,8 +28,8 @@ function buildSystemPrompt(
   multiDoc: boolean,
 ): string {
   const intro = multiDoc
-    ? "Ты помощник по нескольким документам пользователя. Отвечай на русском. Пиши обычным текстом, без markdown (заголовки #, **жирный**, обратные кавычки). Фрагменты подписаны именами файлов — сопоставляй ответ с нужным файлом; при общем вопросе используй все релевантные блоки. Опирайся на приведённый текст; если ответа нет — скажи прямо, не выдумывай."
-    : "Ты помощник по документам пользователя. Отвечай на русском. Пиши обычным текстом, без markdown (заголовки #, **жирный**, обратные кавычки). Ниже — только фрагменты из файлов этого пользователя. Опирайся на них; если ответа нет — скажи прямо, не выдумывай.";
+    ? "Ты помощник по нескольким документам пользователя. Отвечай на русском. Используй только факты из приведённых фрагментов; не добавляй внешние знания. Фрагменты подписаны именами файлов — сопоставляй ответ с нужным файлом; при общем вопросе используй все релевантные блоки. Если ответа в тексте нет — скажи прямо. Пиши обычным текстом, без markdown (заголовки #, **жирный**, обратные кавычки)."
+    : "Ты помощник по документам пользователя. Отвечай на русском. Используй только фрагменты из файлов ниже; не добавляй внешние знания. Если ответа в тексте нет — скажи прямо. Пиши обычным текстом, без markdown (заголовки #, **жирный**, обратные кавычки).";
   if (!chunks.length) {
     return `${intro}\n\nПо запросу не найдено релевантных фрагментов в индексе (или индекс пуст после перезапуска сервера). Ответь кратко и предложи загрузить документы на странице загрузки.`;
   }
@@ -60,6 +65,7 @@ export function ChatPanel() {
   const send = async () => {
     const text = input.trim();
     if (!text || busy || sttBusy) return;
+    const priorThread = messages;
     setInput("");
     setMessages((m) => [...m, { role: "user", content: text }]);
     setBusy(true);
@@ -79,14 +85,22 @@ export function ChatPanel() {
 
       const docNames = Object.fromEntries(myDocs.map((d) => [d.id, d.original_filename]));
       const multi = indexedIds.length > 1;
-      const topK = multi ? 12 : 6;
+      const topK = multi ? CHAT_TOPK_MULTI : CHAT_TOPK_SINGLE;
       let chunks = multi
         ? await ragQueryBalanced(text, authFetch, topK, indexedIds)
         : await ragQuery(text, authFetch, topK, indexedIds);
       chunks = await hydrateChunkTextsFromDocuments(chunks, authFetch);
       setLastChunks(chunks);
       const systemPrompt = buildSystemPrompt(chunks, docNames, multi);
-      const reply = await aiChat(text, systemPrompt, authFetch, { maxTokens: 1200 });
+      const historyStr = formatBriefChatHistory(priorThread, { maxMessages: 12, maxChars: 4200 });
+      const userPrompt =
+        historyStr.length > 0
+          ? `Ранее в этом диалоге (ваши проиндексированные файлы):\n${historyStr}\n\nТекущий вопрос:\n${text}`
+          : text;
+      const reply = await aiChat(userPrompt, systemPrompt, authFetch, {
+        maxTokens: CHAT_MAX_TOKENS,
+        temperature: CHAT_TEMPERATURE,
+      });
       setMessages((m) => [...m, { role: "assistant", content: reply.content }]);
     } catch (e) {
       const raw = e instanceof Error ? e.message : "Ошибка запроса";

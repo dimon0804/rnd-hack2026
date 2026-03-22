@@ -14,3 +14,23 @@ export function MoonIcon() {
     </svg>
   );
 }
+
+/** Озвучивание включено */
+export function SpeakerOnIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+      <path d="M11 5L6 9H2v6h4l5 4V5z" />
+      <path d="M15.54 8.46a5 5 0 010 7.07M19.07 4.93a9 9 0 010 14.14" />
+    </svg>
+  );
+}
+
+/** Озвучивание выключено */
+export function SpeakerOffIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+      <path d="M11 5L6 9H2v6h4l5 4V5z" />
+      <path d="M23 9l-6 6M17 9l6 6" />
+    </svg>
+  );
+}

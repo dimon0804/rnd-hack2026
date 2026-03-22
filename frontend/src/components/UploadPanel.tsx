@@ -15,6 +15,7 @@ import {
 } from "../api/documents";
 import { documentStatusRu } from "../lib/documentStatus";
 import { ProcessingOverlay } from "./workspace/ProcessingOverlay";
+import { DocumentCollectionChips } from "./DocumentCollectionChips";
 import { useAuth } from "../context/AuthContext";
 
 const DOCS_PAGE_SIZE = 8;
@@ -60,6 +61,8 @@ export function UploadPanel() {
   const [docsPage, setDocsPage] = useState(1);
   const [collections, setCollections] = useState<CollectionItem[]>([]);
   const [uploadCollectionIds, setUploadCollectionIds] = useState<string[]>([]);
+  /** Пустой = все документы; иначе — документы хотя бы в одной из выбранных коллекций. */
+  const [filterCollectionIds, setFilterCollectionIds] = useState<string[]>([]);
   const [newCollName, setNewCollName] = useState("");
   const [collBusy, setCollBusy] = useState(false);
   /** Блокировка чекбоксов меток на время PATCH одного документа */
@@ -71,12 +74,14 @@ export function UploadPanel() {
       return;
     }
     try {
-      const rows = await listDocuments(authFetch);
+      const rows = await listDocuments(authFetch, {
+        collectionIds: filterCollectionIds.length > 0 ? filterCollectionIds : undefined,
+      });
       setDocs(rows);
     } catch {
       setDocs([]);
     }
-  }, [isAuthenticated, authFetch]);
+  }, [isAuthenticated, authFetch, filterCollectionIds]);
 
   const refreshCollections = useCallback(async () => {
     if (!isAuthenticated) {
@@ -96,8 +101,16 @@ export function UploadPanel() {
     void refreshCollections();
   }, [isHydrated, isAuthenticated, refreshList, refreshCollections]);
 
+  useEffect(() => {
+    setDocsPage(1);
+  }, [filterCollectionIds]);
+
   const toggleUploadColl = (id: string) => {
     setUploadCollectionIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
+
+  const toggleFilterColl = (id: string) => {
+    setFilterCollectionIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   };
 
   const onCreateCollection = async () => {
@@ -124,6 +137,7 @@ export function UploadPanel() {
     try {
       await deleteCollection(id, authFetch);
       setUploadCollectionIds((prev) => prev.filter((x) => x !== id));
+      setFilterCollectionIds((prev) => prev.filter((x) => x !== id));
       await refreshCollections();
       await refreshList();
     } catch (e) {
@@ -148,8 +162,6 @@ export function UploadPanel() {
       setPatchingDocId(null);
     }
   };
-
-  const collectionLabel = (id: string) => collections.find((c) => c.id === id)?.name ?? id.slice(0, 8);
 
   const docsTotalPages = useMemo(() => {
     if (!docs?.length) return 1;
@@ -350,8 +362,8 @@ export function UploadPanel() {
                 <header className="collections-card__head">
                   <h2 className="collections-card__title">Коллекции</h2>
                   <p className="collections-card__hint">
-                    Метки для контекста (работа, учёба, проект). Выбор меток ниже влияет только на следующую загрузку в
-                    зону слева — список «Мои документы» показывает все файлы.
+                    Метки для контекста (работа, учёба, проект). Блок «Фильтр списка» ограничивает «Мои документы»;
+                    «Метки для следующей загрузки» прикрепляются к новым файлам в зоне слева.
                   </p>
                   <details className="collections-more">
                     <summary>Подробнее про поиск и чат</summary>
@@ -433,6 +445,44 @@ export function UploadPanel() {
                 ) : (
                   <p className="collections-empty">Создайте метку выше — появятся быстрые переключатели для загрузки.</p>
                 )}
+
+                {collections.length > 0 ? (
+                  <div className="collections-panel collections-panel--filter">
+                    <h3 className="collections-panel__title">Фильтр списка документов</h3>
+                    <p className="collections-panel__hint">
+                      Отметьте одну или несколько меток — в списке останутся файлы из любой из них. Ничего не выбрано —
+                      показываются все документы.
+                    </p>
+                    <div className="collections-chip-row" role="group" aria-label="Фильтр по коллекциям">
+                      {collections.map((c) => {
+                        const on = filterCollectionIds.includes(c.id);
+                        return (
+                          <button
+                            key={`flt-${c.id}`}
+                            type="button"
+                            className={`collections-tag collections-tag--solo${on ? " collections-tag--selected" : ""}`}
+                            disabled={busy}
+                            onClick={() => toggleFilterColl(c.id)}
+                            aria-pressed={on}
+                          >
+                            <span className="collections-tag__signal" aria-hidden />
+                            <span className="collections-tag__label">{c.name}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {filterCollectionIds.length > 0 ? (
+                      <button
+                        type="button"
+                        className="btn-text collections-filter-reset"
+                        disabled={busy}
+                        onClick={() => setFilterCollectionIds([])}
+                      >
+                        Показать все документы
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
               </section>
             ) : null}
             <div className="panel-head">
@@ -456,7 +506,11 @@ export function UploadPanel() {
             ) : docs === null ? (
               <p className="panel-empty">Загрузка списка…</p>
             ) : docs.length === 0 ? (
-              <p className="panel-empty">Пока пусто — загрузите первый файл слева.</p>
+              <p className="panel-empty">
+                {filterCollectionIds.length > 0
+                  ? "Нет документов с выбранными метками. Снимите фильтр или добавьте метки к файлам."
+                  : "Пока пусто — загрузите первый файл слева."}
+              </p>
             ) : (
               <>
                 <ul className="doc-list">
@@ -488,19 +542,9 @@ export function UploadPanel() {
                             ) : null}
                           </div>
                         </Link>
-                        {collections.length > 0 ? (
-                          <div className="doc-coll-strip">
-                            <div className="doc-coll-tags">
-                              {(d.collection_ids ?? []).length > 0 ? (
-                                (d.collection_ids ?? []).map((cid) => (
-                                  <span key={cid} className="doc-coll-tag" title={collectionLabel(cid)}>
-                                    {collectionLabel(cid)}
-                                  </span>
-                                ))
-                              ) : (
-                                <span className="doc-coll-none">без меток</span>
-                              )}
-                            </div>
+                        <div className="doc-coll-strip">
+                          <DocumentCollectionChips collectionIds={d.collection_ids} collections={collections} />
+                          {collections.length > 0 ? (
                             <details className="doc-coll-details">
                               <summary>Изменить метки</summary>
                               <div className="doc-coll-edit">
@@ -517,8 +561,8 @@ export function UploadPanel() {
                                 ))}
                               </div>
                             </details>
-                          </div>
-                        ) : null}
+                          ) : null}
+                        </div>
                       </div>
                     </li>
                   ))}

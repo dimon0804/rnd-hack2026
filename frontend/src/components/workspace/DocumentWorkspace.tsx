@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
-import type { DocumentItem } from "../../api/documents";
-import { listDocuments } from "../../api/documents";
+import type { CollectionItem, DocumentItem } from "../../api/documents";
+import { listCollections, listDocuments } from "../../api/documents";
 import { aiChat } from "../../api/ai";
 import { formatRagChunksForLlm, ragQuery, ragQueryBalanced, type RagChunk } from "../../api/rag";
 import { documentStatusRu } from "../../lib/documentStatus";
@@ -36,6 +36,8 @@ import { InfographicChart } from "./InfographicChart";
 import { MindmapView } from "./MindmapView";
 import { ProcessingOverlay } from "./ProcessingOverlay";
 import { SttChatToolbar } from "../SttChatToolbar";
+import { DocumentCollectionChips } from "../DocumentCollectionChips";
+import { formatBriefChatHistory } from "../../lib/formatChatHistory";
 
 type Tab =
   | "summary"
@@ -62,6 +64,28 @@ type Props = {
   document: DocumentItem;
 };
 
+/** Текст на кнопках во время запроса к модели (вместо одной точки). */
+const GEN_BTN = "Генерация…";
+
+const CHAT_RAG_TOPK = (multiDoc: boolean) => (multiDoc ? 16 : 10);
+const CHAT_CONTEXT_CHARS = 24000;
+const CHAT_MAX_TOKENS = 2600;
+const CHAT_TEMPERATURE = 0.15;
+
+function buildWorkspaceRagSystemPrompt(scope: string, multiRules: string, ctx: string): string {
+  return `Ты помощник по материалам пользователя (${scope}). Отвечай на русском.
+
+Правила:
+- Используй только факты из блока «Контекст» (фрагменты из индекса по документу). Не добавляй сведения из общих знаний, если их нет в тексте.
+- Если по контексту нельзя ответить — скажи прямо; предложи переформулировать вопрос или уточнить тему.
+- Если нужно объединить несколько фрагментов — сделай это связно; при явном противоречии в фрагментах укажи на это.
+- Отвечай по сути вопроса, без лишней воды.
+- Пиши обычным текстом, без markdown (#, **, обратные кавычки).${multiRules}
+
+Контекст:
+${ctx || "(пусто)"}`;
+}
+
 export function DocumentWorkspace({ document }: Props) {
   const { authFetch } = useAuth();
   const [tab, setTab] = useState<Tab>("summary");
@@ -72,6 +96,7 @@ export function DocumentWorkspace({ document }: Props) {
   const [chatInput, setChatInput] = useState("");
   const [chatBusy, setChatBusy] = useState(false);
   const [testsText, setTestsText] = useState<string | null>(null);
+  const [testsLoading, setTestsLoading] = useState(false);
   const [cards, setCards] = useState<{ q: string; a: string }[]>([]);
   const [cardsLoading, setCardsLoading] = useState(false);
   const [easySimple, setEasySimple] = useState<string | null>(null);
@@ -106,6 +131,7 @@ export function DocumentWorkspace({ document }: Props) {
   const [docNamesById, setDocNamesById] = useState<Record<string, string>>(() => ({
     [document.id]: document.original_filename,
   }));
+  const [collections, setCollections] = useState<CollectionItem[]>([]);
 
   const st = document.status.trim().toLowerCase();
   const ready = st === "ready";
@@ -116,6 +142,20 @@ export function DocumentWorkspace({ document }: Props) {
     () => (document.group_document_ids?.length ? document.group_document_ids : [document.id]),
     [document.id, document.group_document_ids],
   );
+
+  useEffect(() => {
+    let cancelled = false;
+    void listCollections(authFetch)
+      .then((rows) => {
+        if (!cancelled) setCollections(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setCollections([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [authFetch]);
 
   useEffect(() => {
     if (!ready) return;
@@ -185,28 +225,35 @@ export function DocumentWorkspace({ document }: Props) {
   const sendChat = async () => {
     const text = chatInput.trim();
     if (!text || chatBusy || !ready || sttBusy) return;
+    const priorThread = messages;
     setChatInput("");
     setMessages((m) => [...m, { role: "user", content: text }]);
     setChatBusy(true);
     try {
-      const chatTopK = ragIds.length > 1 ? 12 : 6;
-      let chunks =
-        ragIds.length > 1
-          ? await ragQueryBalanced(text, authFetch, chatTopK, ragIds)
-          : await ragQuery(text, authFetch, chatTopK, ragIds);
+      const multiDoc = ragIds.length > 1;
+      const chatTopK = CHAT_RAG_TOPK(multiDoc);
+      let chunks = multiDoc
+        ? await ragQueryBalanced(text, authFetch, chatTopK, ragIds)
+        : await ragQuery(text, authFetch, chatTopK, ragIds);
       chunks = await hydrateChunkTextsFromDocuments(chunks, authFetch);
       const label = (id: string) => docNamesById[id] ?? `файл ${id.slice(0, 8)}…`;
-      const ctx = formatRagChunksForLlm(chunks, label, 14000);
-      const scope =
-        ragIds.length > 1
-          ? "нескольким загруженным файлам (одна тематическая группа)"
-          : "этому документу";
-      const multiRules =
-        ragIds.length > 1
-          ? " Контекст размечен по имени файла — связывай факты с указанным файлом; при общем вопросе используй все релевантные фрагменты; не смешивай сведения из разных файлов без пометки."
-          : "";
-      const system = `Помощник по материалам пользователя (${scope}). Отвечай на русском только по приведённому контексту. Если в контексте нет ответа — скажи об этом. Пиши обычным текстом, без markdown (#, **, обратные кавычки).${multiRules}\n\nКонтекст:\n${ctx || "(пусто)"}`;
-      const reply = await aiChat(text, system, authFetch, { maxTokens: 1200 });
+      const ctx = formatRagChunksForLlm(chunks, label, CHAT_CONTEXT_CHARS);
+      const scope = multiDoc
+        ? "нескольким загруженным файлам (одна тематическая группа)"
+        : "этому документу";
+      const multiRules = multiDoc
+        ? " Контекст размечен по имени файла — связывай факты с указанным файлом; при общем вопросе используй все релевантные фрагменты; не смешивай сведения из разных файлов без пометки."
+        : "";
+      const system = buildWorkspaceRagSystemPrompt(scope, multiRules, ctx);
+      const historyStr = formatBriefChatHistory(priorThread, { maxMessages: 12, maxChars: 4200 });
+      const userPrompt =
+        historyStr.length > 0
+          ? `Ранее в этом диалоге (те же документы в рабочей области):\n${historyStr}\n\nТекущий вопрос:\n${text}`
+          : text;
+      const reply = await aiChat(userPrompt, system, authFetch, {
+        maxTokens: CHAT_MAX_TOKENS,
+        temperature: CHAT_TEMPERATURE,
+      });
       const sourceChunksForUi =
         chunks.length > 0 ? rankChunksForAssistantAnswer(chunks, reply.content) : [];
       setMessages((m) => [...m, { role: "assistant", content: reply.content, sourceChunks: sourceChunksForUi }]);
@@ -221,28 +268,35 @@ export function DocumentWorkspace({ document }: Props) {
   const runPromptTemplate = async (id: PromptTemplateId) => {
     if (!ready || chatBusy || sttBusy) return;
     const t = PROMPT_TEMPLATES[id];
+    const priorThread = messages;
     setTab("chat");
     setMessages((m) => [...m, { role: "user", content: t.label }]);
     setChatBusy(true);
     try {
-      const tplTopK = ragIds.length > 1 ? 12 : 6;
-      let chunks =
-        ragIds.length > 1
-          ? await ragQueryBalanced(t.ragQuery, authFetch, tplTopK, ragIds)
-          : await ragQuery(t.ragQuery, authFetch, tplTopK, ragIds);
+      const multiDoc = ragIds.length > 1;
+      const tplTopK = CHAT_RAG_TOPK(multiDoc);
+      let chunks = multiDoc
+        ? await ragQueryBalanced(t.ragQuery, authFetch, tplTopK, ragIds)
+        : await ragQuery(t.ragQuery, authFetch, tplTopK, ragIds);
       chunks = await hydrateChunkTextsFromDocuments(chunks, authFetch);
       const label = (id: string) => docNamesById[id] ?? `файл ${id.slice(0, 8)}…`;
-      const ctx = formatRagChunksForLlm(chunks, label, 14000);
-      const scope =
-        ragIds.length > 1
-          ? "нескольким загруженным файлам (одна тематическая группа)"
-          : "этому документу";
-      const multiRules =
-        ragIds.length > 1
-          ? " Контекст размечен по имени файла — связывай факты с указанным файлом; при общем вопросе используй все релевантные фрагменты."
-          : "";
-      const system = `Помощник по материалам пользователя (${scope}). Отвечай на русском только по приведённому контексту. Если в контексте нет ответа — скажи об этом. Пиши обычным текстом, без markdown (#, **, обратные кавычки).${multiRules}\n\nКонтекст:\n${ctx || "(пусто)"}`;
-      const reply = await aiChat(t.llmInstruction, system, authFetch, { maxTokens: 1400 });
+      const ctx = formatRagChunksForLlm(chunks, label, CHAT_CONTEXT_CHARS);
+      const scope = multiDoc
+        ? "нескольким загруженным файлам (одна тематическая группа)"
+        : "этому документу";
+      const multiRules = multiDoc
+        ? " Контекст размечен по имени файла — связывай факты с указанным файлом; при общем вопросе используй все релевантные фрагменты."
+        : "";
+      const system = buildWorkspaceRagSystemPrompt(scope, multiRules, ctx);
+      const historyStr = formatBriefChatHistory(priorThread, { maxMessages: 12, maxChars: 4200 });
+      const userPrompt =
+        historyStr.length > 0
+          ? `Ранее в диалоге:\n${historyStr}\n\nЗадача (кнопка «${t.label}»):\n${t.llmInstruction}`
+          : t.llmInstruction;
+      const reply = await aiChat(userPrompt, system, authFetch, {
+        maxTokens: CHAT_MAX_TOKENS,
+        temperature: CHAT_TEMPERATURE,
+      });
       const sourceChunksForUi =
         chunks.length > 0 ? rankChunksForAssistantAnswer(chunks, reply.content) : [];
       setMessages((m) => [...m, { role: "assistant", content: reply.content, sourceChunks: sourceChunksForUi }]);
@@ -446,6 +500,7 @@ export function DocumentWorkspace({ document }: Props) {
 
   const onGenerateTests = async () => {
     if (!ready) return;
+    setTestsLoading(true);
     setTestsText(null);
     try {
       const t = await runQuickAction("test", ragIds, authFetch);
@@ -453,6 +508,8 @@ export function DocumentWorkspace({ document }: Props) {
       setTab("tests");
     } catch (e) {
       setTestsText(humanizeChatError(e instanceof Error ? e.message : "Ошибка"));
+    } finally {
+      setTestsLoading(false);
     }
   };
 
@@ -518,6 +575,10 @@ export function DocumentWorkspace({ document }: Props) {
         <aside className="workspace-sidebar">
           <p className="sidebar-heading">Документ</p>
           <h2 className="workspace-file-title">{document.original_filename}</h2>
+          <div className="workspace-coll-strip">
+            <span className="workspace-coll-strip__label">Коллекции</span>
+            <DocumentCollectionChips collectionIds={document.collection_ids} collections={collections} />
+          </div>
           {ragIds.length > 1 ? (
             <p style={styles.groupBanner}>
               Чат и инструменты учитывают <strong>{ragIds.length} файлов</strong> в одной тематической группе (общий поиск
@@ -611,13 +672,19 @@ export function DocumentWorkspace({ document }: Props) {
                   disabled={!ready || easyLoading === "simple"}
                   onClick={() => void genEasySimple()}
                 >
-                  {easyLoading === "simple" ? "…" : "Сгенерировать"}
+                  {easyLoading === "simple" ? GEN_BTN : "Сгенерировать"}
                 </button>
               </div>
-              <p style={styles.bodyText}>
-                {easySimple ??
-                  "Здесь появится текст: что в документе и зачем это важно, простым языком."}
-              </p>
+              {easyLoading === "simple" ? (
+                <p className="workspace-loading-hint workspace-loading-hint--pulse" role="status">
+                  Генерируем простое объяснение по тексту из RAG…
+                </p>
+              ) : (
+                <p style={styles.bodyText}>
+                  {easySimple ??
+                    "Здесь появится текст: что в документе и зачем это важно, простым языком."}
+                </p>
+              )}
             </div>
           ) : null}
 
@@ -635,12 +702,18 @@ export function DocumentWorkspace({ document }: Props) {
                   disabled={!ready || easyLoading === "short"}
                   onClick={() => void genEasyShort()}
                 >
-                  {easyLoading === "short" ? "…" : "Сгенерировать"}
+                  {easyLoading === "short" ? GEN_BTN : "Сгенерировать"}
                 </button>
               </div>
-              <p style={styles.bodyText}>
-                {easyShort ?? "Нажмите «Сгенерировать» — получите сжатую выжимку сути материала."}
-              </p>
+              {easyLoading === "short" ? (
+                <p className="workspace-loading-hint workspace-loading-hint--pulse" role="status">
+                  Генерируем краткий пересказ…
+                </p>
+              ) : (
+                <p style={styles.bodyText}>
+                  {easyShort ?? "Нажмите «Сгенерировать» — получите сжатую выжимку сути материала."}
+                </p>
+              )}
             </div>
           ) : null}
 
@@ -654,13 +727,19 @@ export function DocumentWorkspace({ document }: Props) {
                   disabled={!ready || reportLoading}
                   onClick={() => void onOfficialReport()}
                 >
-                  {reportLoading ? "…" : "Сформировать по шаблону"}
+                  {reportLoading ? GEN_BTN : "Сформировать по шаблону"}
                 </button>
               </div>
               <p style={styles.muted}>
                 Деловая справка: цель, содержание, ключевые положения, выводы, рекомендации — по тексту документа из RAG.
               </p>
-              <pre style={styles.pre}>{reportText ?? "Нажмите «Сформировать по шаблону»."}</pre>
+              {reportLoading ? (
+                <p className="workspace-loading-hint workspace-loading-hint--pulse" role="status">
+                  Формируем отчёт по шаблону…
+                </p>
+              ) : (
+                <pre style={styles.pre}>{reportText ?? "Нажмите «Сформировать по шаблону»."}</pre>
+              )}
             </div>
           ) : null}
 
@@ -684,10 +763,14 @@ export function DocumentWorkspace({ document }: Props) {
               <div style={styles.rowBetween}>
                 <h3 className="tab-title">Структурированные данные</h3>
                 <button type="button" className="btn-solid" disabled={!ready || tableLoading} onClick={() => void onExtractTable()}>
-                  {tableLoading ? "…" : "Сформировать CSV"}
+                  {tableLoading ? GEN_BTN : "Сформировать CSV"}
                 </button>
               </div>
-              {tableLoading ? <p style={styles.muted}>Запрос к серверу и модели…</p> : null}
+              {tableLoading ? (
+                <p className="workspace-loading-hint workspace-loading-hint--pulse" role="status">
+                  Запрос к серверу и модели, формируем CSV…
+                </p>
+              ) : null}
               {tableErr ? (
                 <p style={styles.tableErr} role="alert">
                   {tableErr}
@@ -769,7 +852,11 @@ export function DocumentWorkspace({ document }: Props) {
                       ) : null}
                     </div>
                   ))}
-                  {chatBusy ? <p style={styles.muted}>Ищем в документе…</p> : null}
+                  {chatBusy ? (
+                    <p className="workspace-loading-hint workspace-loading-hint--pulse" role="status">
+                      Ищем в документе и формируем ответ…
+                    </p>
+                  ) : null}
                 </div>
               </div>
               <div className="chat-composer">
@@ -804,7 +891,7 @@ export function DocumentWorkspace({ document }: Props) {
                   disabled={chatBusy || !ready || sttBusy}
                   onClick={() => void sendChat()}
                 >
-                  Отправить
+                  {chatBusy ? "Ждём ответ…" : "Отправить"}
                 </button>
               </div>
             </div>
@@ -814,11 +901,22 @@ export function DocumentWorkspace({ document }: Props) {
             <div className="tab-panel">
               <div style={styles.rowBetween}>
                 <h3 className="tab-title">Тесты</h3>
-                <button type="button" className="btn-solid" disabled={!ready} onClick={() => void onGenerateTests()}>
-                  Создать тест
+                <button
+                  type="button"
+                  className="btn-solid"
+                  disabled={!ready || testsLoading}
+                  onClick={() => void onGenerateTests()}
+                >
+                  {testsLoading ? GEN_BTN : "Создать тест"}
                 </button>
               </div>
-              <pre style={styles.pre}>{testsText ?? "Нажмите «Создать тест» — вопросы появятся здесь."}</pre>
+              {testsLoading ? (
+                <p className="workspace-loading-hint workspace-loading-hint--pulse" role="status">
+                  Формируем вопросы по материалу документа…
+                </p>
+              ) : (
+                <pre style={styles.pre}>{testsText ?? "Нажмите «Создать тест» — вопросы появятся здесь."}</pre>
+              )}
             </div>
           ) : null}
 
@@ -826,11 +924,26 @@ export function DocumentWorkspace({ document }: Props) {
             <div className="tab-panel">
               <div style={styles.rowBetween}>
                 <h3 className="tab-title">Карточки</h3>
-                <button type="button" className="btn-solid" disabled={!ready || cardsLoading} onClick={() => void onFlashcards()}>
-                  {cardsLoading ? "…" : "Сгенерировать"}
+                <button
+                  type="button"
+                  className="btn-solid"
+                  disabled={!ready || cardsLoading}
+                  onClick={() => void onFlashcards()}
+                >
+                  {cardsLoading ? GEN_BTN : "Сгенерировать"}
                 </button>
               </div>
+              {cardsLoading ? (
+                <p className="workspace-loading-hint workspace-loading-hint--pulse" role="status">
+                  Генерируем карточки по тексту из RAG…
+                </p>
+              ) : null}
               <div className="flash-grid">
+                {cards.length === 0 && !cardsLoading ? (
+                  <p className="flash-grid__empty">
+                    Нажмите «Сгенерировать» — здесь появятся карточки с вопросом на лицевой стороне и ответом с обратной.
+                  </p>
+                ) : null}
                 {cards.map((c, i) => (
                   <FlashCard key={i} q={c.q} a={c.a} />
                 ))}
@@ -853,10 +966,14 @@ export function DocumentWorkspace({ document }: Props) {
                   disabled={!ready || presentationLoading}
                   onClick={() => void buildPresentation()}
                 >
-                  {presentationLoading ? "…" : "Создать и скачать"}
+                  {presentationLoading ? GEN_BTN : "Создать и скачать"}
                 </button>
               </div>
-              {presentationLoading ? <p style={styles.muted}>Генерируем слайды и собираем PPTX…</p> : null}
+              {presentationLoading ? (
+                <p className="workspace-loading-hint workspace-loading-hint--pulse" role="status">
+                  Генерируем слайды и собираем PPTX…
+                </p>
+              ) : null}
               {presentationErr ? (
                 <p style={styles.tableErr} role="alert">
                   {presentationErr}
@@ -896,7 +1013,7 @@ export function DocumentWorkspace({ document }: Props) {
                     disabled={!ready || videoLoading}
                     onClick={() => void onVideoRecap()}
                   >
-                    {videoLoading ? "…" : "Сгенерировать план"}
+                    {videoLoading ? GEN_BTN : "Сгенерировать план"}
                   </button>
                   <button
                     type="button"
@@ -908,7 +1025,11 @@ export function DocumentWorkspace({ document }: Props) {
                   </button>
                 </div>
               </div>
-              {videoLoading ? <p style={styles.muted}>Строим сцены и озвучку по RAG…</p> : null}
+              {videoLoading ? (
+                <p className="workspace-loading-hint workspace-loading-hint--pulse" role="status">
+                  Строим сцены и озвучку по RAG…
+                </p>
+              ) : null}
               {videoErr ? (
                 <p style={styles.tableErr} role="alert">
                   {videoErr}
@@ -968,7 +1089,7 @@ export function DocumentWorkspace({ document }: Props) {
                     disabled={!ready || infographicLoading}
                     onClick={() => void onInfographic()}
                   >
-                    {infographicLoading ? "…" : "Построить по данным"}
+                    {infographicLoading ? GEN_BTN : "Построить по данным"}
                   </button>
                   <button
                     type="button"
@@ -980,7 +1101,11 @@ export function DocumentWorkspace({ document }: Props) {
                   </button>
                 </div>
               </div>
-              {infographicLoading ? <p style={styles.muted}>Извлекаем метрики и тип графика…</p> : null}
+              {infographicLoading ? (
+                <p className="workspace-loading-hint workspace-loading-hint--pulse" role="status">
+                  Извлекаем метрики и тип графика…
+                </p>
+              ) : null}
               {infographicErr ? (
                 <p style={styles.tableErr} role="alert">
                   {infographicErr}
@@ -988,9 +1113,7 @@ export function DocumentWorkspace({ document }: Props) {
               ) : null}
               {infographic ? (
                 <>
-                  <h4 className="tab-title" style={{ marginTop: 12, fontSize: "1.05rem" }}>
-                    {infographic.title}
-                  </h4>
+                  <h4 className="tab-title tab-title--sub">{infographic.title}</h4>
                   {infographic.subtitle ? <p style={styles.muted}>{infographic.subtitle}</p> : null}
                   <InfographicChart spec={infographic} />
                   {infographic.items.some((it) => it.source_hint) ? (
@@ -1023,7 +1146,7 @@ export function DocumentWorkspace({ document }: Props) {
               <div style={styles.rowBetween}>
                 <h3 className="tab-title">Интеллект-карта</h3>
                 <button type="button" className="btn-solid" disabled={!ready || mindmapLoading} onClick={() => void buildMindmap()}>
-                  {mindmapLoading ? "…" : "Перестроить"}
+                  {mindmapLoading ? GEN_BTN : "Перестроить"}
                 </button>
               </div>
               <p style={styles.muted}>
@@ -1037,7 +1160,9 @@ export function DocumentWorkspace({ document }: Props) {
                   <pre style={styles.pre}>{mindmapRaw}</pre>
                 </div>
               ) : mindmapLoading ? (
-                <p style={styles.muted}>Строим структуру…</p>
+                <p className="workspace-loading-hint workspace-loading-hint--pulse" role="status">
+                  Строим структуру mindmap…
+                </p>
               ) : mindmapRaw && !mindmapRoot ? (
                 <pre style={styles.pre}>{mindmapRaw}</pre>
               ) : (
@@ -1056,8 +1181,13 @@ export function DocumentWorkspace({ document }: Props) {
         <aside className="workspace-aside">
           <h3 className="aside-title">Быстрые действия</h3>
           <div style={styles.quickList}>
-            <button type="button" style={styles.quickBtn} disabled={!ready} onClick={() => void onGenerateTests()}>
-              Создать тест
+            <button
+              type="button"
+              style={styles.quickBtn}
+              disabled={!ready || testsLoading}
+              onClick={() => void onGenerateTests()}
+            >
+              {testsLoading ? GEN_BTN : "Создать тест"}
             </button>
             <div style={styles.podcastBox}>
               <p style={styles.podcastTitle}>Аудиопересказ (сценарий)</p>
@@ -1087,7 +1217,7 @@ export function DocumentWorkspace({ document }: Props) {
                 </select>
               </label>
               <button type="button" style={styles.quickBtn} disabled={!ready || podcastLoading} onClick={() => void onPodcast()}>
-                {podcastLoading ? "Генерация…" : "Сгенерировать диалог"}
+                {podcastLoading ? GEN_BTN : "Сгенерировать диалог"}
               </button>
               {podcastScript ? (
                 <>
@@ -1123,7 +1253,7 @@ export function DocumentWorkspace({ document }: Props) {
                 void buildPresentation();
               }}
             >
-              {presentationLoading ? "Презентация…" : "Презентация (слайды)"}
+              {presentationLoading ? GEN_BTN : "Презентация (слайды)"}
             </button>
             <button
               type="button"
@@ -1134,7 +1264,7 @@ export function DocumentWorkspace({ document }: Props) {
                 void onVideoRecap();
               }}
             >
-              {videoLoading ? "Видео-план…" : "Видео (сцены + озвучка)"}
+              {videoLoading ? GEN_BTN : "Видео (сцены + озвучка)"}
             </button>
             <button
               type="button"
@@ -1145,7 +1275,7 @@ export function DocumentWorkspace({ document }: Props) {
                 void onInfographic();
               }}
             >
-              {infographicLoading ? "Инфографика…" : "Инфографика (график)"}
+              {infographicLoading ? GEN_BTN : "Инфографика (график)"}
             </button>
             <button
               type="button"
@@ -1156,7 +1286,7 @@ export function DocumentWorkspace({ document }: Props) {
                 void buildMindmap();
               }}
             >
-              Mindmap (граф)
+              {mindmapLoading ? GEN_BTN : "Mindmap (граф)"}
             </button>
             <button
               type="button"
@@ -1164,7 +1294,7 @@ export function DocumentWorkspace({ document }: Props) {
               disabled={!ready || packageLoading}
               onClick={() => void onDownloadDocumentPackage()}
             >
-              {packageLoading ? "Архив…" : "Пакет документа (ZIP)"}
+              {packageLoading ? "Собираем архив…" : "Пакет документа (ZIP)"}
             </button>
           </div>
         </aside>
@@ -1231,15 +1361,19 @@ function FlashCard({ q, a }: { q: string; a: string }) {
         <span className="flash-card__inner">
           <span className="flash-card__face flash-card__face--front">
             <span className="chat-label">Вопрос</span>
-            <span className="flash-face">{q}</span>
+            <span className="flash-face">
+              <span className="flash-face__text">{q}</span>
+            </span>
           </span>
           <span className="flash-card__face flash-card__face--back">
             <span className="chat-label">Ответ</span>
-            <span className="flash-face">{a}</span>
+            <span className="flash-face">
+              <span className="flash-face__text">{a}</span>
+            </span>
           </span>
         </span>
       </span>
-      <span className="flash-card__hint muted small">Нажмите, чтобы перевернуть</span>
+      <span className="flash-card__hint">Нажмите, чтобы перевернуть</span>
     </button>
   );
 }

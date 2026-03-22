@@ -105,6 +105,8 @@ export type TopicGroupMemberStat = {
   document_id: string;
   original_filename: string;
   status: string;
+  /** Персональные коллекции (метки) документа. */
+  collection_ids?: string[];
 };
 
 export type TopicGroupStat = {

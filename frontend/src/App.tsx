@@ -7,6 +7,7 @@ import { NotFoundPage } from "./pages/NotFoundPage";
 import { UploadPage } from "./pages/UploadPage";
 import { CabinetPage } from "./pages/CabinetPage";
 import { WorkspacePage } from "./pages/WorkspacePage";
+import { OfflineSnakePage } from "./pages/OfflineSnakePage";
 
 export function App() {
   return (
@@ -20,6 +21,7 @@ export function App() {
           <Route path="/upload" element={<UploadPage />} />
           <Route path="/workspace/:documentId" element={<WorkspacePage />} />
           <Route path="/chat" element={<ChatPage />} />
+          <Route path="/offline-snake" element={<OfflineSnakePage />} />
           <Route path="*" element={<NotFoundPage />} />
         </Route>
       </Routes>

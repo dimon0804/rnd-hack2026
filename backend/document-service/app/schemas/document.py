@@ -62,6 +62,7 @@ class TopicGroupMemberStat(BaseModel):
     document_id: uuid.UUID
     original_filename: str
     status: str
+    collection_ids: list[uuid.UUID] = Field(default_factory=list)
 
 
 class TopicGroupStat(BaseModel):

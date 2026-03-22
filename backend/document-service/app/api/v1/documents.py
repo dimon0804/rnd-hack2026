@@ -569,6 +569,9 @@ def document_stats(
         by_tg.setdefault(d.topic_group_id, []).append(d)
 
     _dt_min = datetime.min.replace(tzinfo=timezone.utc)
+    all_group_doc_ids = [m.id for ms in by_tg.values() for m in ms]
+    coll_by_doc = batch_collection_ids_map(db, all_group_doc_ids)
+
     topic_groups_list: list[TopicGroupStat] = []
     for tgid, members in by_tg.items():
         members_sorted = sorted(
@@ -585,6 +588,7 @@ def document_stats(
                         document_id=m.id,
                         original_filename=m.original_filename,
                         status=m.status,
+                        collection_ids=coll_by_doc.get(m.id, []),
                     )
                     for m in members_sorted
                 ],

@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import { AppHeader } from "./AppHeader";
+import { OfflineBanner } from "./OfflineBanner";
 import { CookieConsent } from "./CookieConsent";
 import { LiveSystemPanel } from "./LiveSystemPanel";
 import { GlassDropletsForeground, GlassDropletsLayer } from "./GlassDroplets";
@@ -20,6 +21,7 @@ export function Layout() {
       <div className="atmosphere-blobs" aria-hidden />
       <GlassDropletsLayer />
       <AppHeader />
+      <OfflineBanner />
       <div className="main-stage" key={pathname}>
         <Outlet />
       </div>

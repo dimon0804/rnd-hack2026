@@ -1,5 +1,5 @@
-# syntax=docker/dockerfile:1
-# Кэш npm ускоряет повторные сборки (нужен BuildKit: Docker Desktop по умолчанию включён).
+# Без `# syntax=docker/dockerfile:1` — не требуется тянуть образ парсера с Docker Hub (при сетевых EOF на registry сборка не падает).
+# Кэш npm ускоряет повторные сборки (BuildKit в Docker Desktop / DOCKER_BUILDKIT=1).
 FROM node:20-bookworm-slim
 
 WORKDIR /app

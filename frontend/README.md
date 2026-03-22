@@ -20,4 +20,12 @@ docker compose --profile dev up -d --build
 
 Для списка «Мои документы» вставьте access token из ответа `POST /api/v1/auth/login` (сохраняется в `localStorage`).
 
-Переменная `VITE_API_BASE` (если задана) задаёт абсолютный базовый URL API вместо относительного пути.
+Переменная `VITE_API_BASE` (если задана) задаёт абсолютный базовый URL API вместо относительного пути (без завершающего `/`). Для **production**-сборки, если фронт и API на разных доменах, задайте её при билде, например `VITE_API_BASE=https://api.example.com`.
+
+### Туннель / публичный dev (CloudPub и т.п.)
+
+Если Vite открывают по кастомному хосту, без `allowedHosts` будет ошибка *«This host is not allowed»*. В `vite.config.ts` уже перечислены известные хосты; новый поддомен можно добавить через **`VITE_DEV_ALLOWED_HOSTS`** (через запятую), не меняя код.
+
+Чтобы запросы `/api` с dev-сервера шли на **удалённый** gateway, задайте **`DEV_PROXY_TARGET`** (HTTPS без слэша в конце), например:
+
+`DEV_PROXY_TARGET=https://debonairly-decent-bulldog.cloudpub.ru npm run dev`
