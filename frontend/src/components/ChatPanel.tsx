@@ -16,6 +16,7 @@ import {
 import { fetchSuggestedChatQuestions, type SuggestedQuestions } from "../lib/suggestedChatQuestions";
 import { hydrateChunkTextsFromDocuments } from "../lib/ragChunkHydrate";
 import { useAuth } from "../context/AuthContext";
+import { ChatMessageTts } from "./ChatMessageTts";
 import { SttChatToolbar } from "./SttChatToolbar";
 
 type Msg = { role: "user" | "assistant"; content: string };
@@ -67,6 +68,7 @@ export function ChatPanel() {
   }>({ data: null, loading: false, err: null });
   const [faqSuggestionsOpen, setFaqSuggestionsOpen] = useState(false);
   const [ragSearchMode, setRagSearchMode] = useState<RagSearchMode>("semantic");
+  const [chatTtsPlayingIndex, setChatTtsPlayingIndex] = useState<number | null>(null);
 
   useEffect(() => {
     if (input.trim().length > 0) {
@@ -325,6 +327,17 @@ export function ChatPanel() {
               >
                 <div style={styles.avatar}>{msg.role === "user" ? "Вы" : "AI"}</div>
                 <div style={{ ...styles.bubble, ...(msg.role === "user" ? styles.bubbleUser : styles.bubbleBot) }}>
+                  {msg.role === "assistant" ? (
+                    <div style={styles.bubbleTtsRow}>
+                      <ChatMessageTts
+                        content={msg.content}
+                        messageIndex={i}
+                        playingIndex={chatTtsPlayingIndex}
+                        setPlayingIndex={setChatTtsPlayingIndex}
+                        disabled={busy || sttBusy}
+                      />
+                    </div>
+                  ) : null}
                   <div style={styles.bubbleText}>{msg.content}</div>
                 </div>
               </div>
@@ -564,6 +577,11 @@ const styles: Record<string, CSSProperties> = {
   bubbleBot: {
     background: "rgba(255,255,255,0.04)",
     border: "1px solid var(--border)",
+  },
+  bubbleTtsRow: {
+    display: "flex",
+    justifyContent: "flex-end",
+    marginBottom: 6,
   },
   bubbleText: { margin: 0, whiteSpace: "pre-wrap", fontSize: "0.95rem", lineHeight: 1.55 },
   thinking: { margin: 0, color: "var(--muted)", fontSize: "0.88rem", fontStyle: "italic", paddingLeft: 46 },

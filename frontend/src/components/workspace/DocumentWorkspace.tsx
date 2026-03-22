@@ -41,6 +41,7 @@ import { fetchStockImageByQuery } from "../../lib/videoRecapMedia";
 import { InfographicChart } from "./InfographicChart";
 import { MindmapView } from "./MindmapView";
 import { ProcessingOverlay } from "./ProcessingOverlay";
+import { ChatMessageTts } from "../ChatMessageTts";
 import { SttChatToolbar } from "../SttChatToolbar";
 import { DocumentCollectionChips } from "../DocumentCollectionChips";
 import { formatBriefChatHistory } from "../../lib/formatChatHistory";
@@ -154,6 +155,7 @@ export function DocumentWorkspace({ document }: Props) {
   }>({ data: null, loading: false, err: null });
   /** Подсказки-вопросы свёрнуты по умолчанию — открываются кнопкой, скрываются при вводе, выборе вопроса или вручную. */
   const [faqSuggestionsOpen, setFaqSuggestionsOpen] = useState(false);
+  const [chatTtsPlayingIndex, setChatTtsPlayingIndex] = useState<number | null>(null);
 
   const st = document.status.trim().toLowerCase();
   const ready = st === "ready";
@@ -172,6 +174,13 @@ export function DocumentWorkspace({ document }: Props) {
     setSuggestedState({ data: null, loading: false, err: null });
     setFaqSuggestionsOpen(false);
   }, [chatStorageKey]);
+
+  useEffect(() => {
+    if (tab !== "chat") {
+      stopSpeaking();
+      setChatTtsPlayingIndex(null);
+    }
+  }, [tab]);
 
   useEffect(() => {
     if (chatInput.trim().length > 0) {
@@ -1049,7 +1058,18 @@ export function DocumentWorkspace({ document }: Props) {
                       key={i}
                       className={`chat-bubble${msg.role === "user" ? " chat-bubble--user" : " chat-bubble--bot"}`}
                     >
-                      <span className="chat-label">{msg.role === "user" ? "Вы" : "Ответ"}</span>
+                      <div className="chat-bubble__top">
+                        <span className="chat-label">{msg.role === "user" ? "Вы" : "Ответ"}</span>
+                        {msg.role === "assistant" ? (
+                          <ChatMessageTts
+                            content={msg.content}
+                            messageIndex={i}
+                            playingIndex={chatTtsPlayingIndex}
+                            setPlayingIndex={setChatTtsPlayingIndex}
+                            disabled={chatBusy || sttBusy}
+                          />
+                        ) : null}
+                      </div>
                       <p>{msg.content}</p>
                       {msg.role === "assistant" && msg.sourceChunks && msg.sourceChunks.length > 0 ? (
                         <ChatSourceCitations chunks={msg.sourceChunks} docLabels={docNamesById} />

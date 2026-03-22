@@ -68,8 +68,15 @@ function pickRuVoices(): { alexey: SpeechSynthesisVoice | null; maria: SpeechSyn
 }
 
 /** Обычный текст одним голосом. */
-export function speakRussian(text: string, pace: SpeakRate = "normal"): void {
-  if (typeof window === "undefined" || !window.speechSynthesis) return;
+export function speakRussian(
+  text: string,
+  pace: SpeakRate = "normal",
+  opts?: { onEnd?: () => void },
+): void {
+  if (typeof window === "undefined" || !window.speechSynthesis) {
+    opts?.onEnd?.();
+    return;
+  }
   window.speechSynthesis.cancel();
   const chunk = text.slice(0, 32000);
   const u = new SpeechSynthesisUtterance(chunk);
@@ -79,6 +86,9 @@ export function speakRussian(text: string, pace: SpeakRate = "normal"): void {
   const v = alexey ?? maria;
   if (v) u.voice = v;
   u.pitch = 1;
+  const done = () => opts?.onEnd?.();
+  u.onend = done;
+  u.onerror = done;
   window.speechSynthesis.speak(u);
 }
 

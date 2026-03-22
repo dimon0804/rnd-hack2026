@@ -4070,6 +4070,44 @@ button.collections-tag.collections-tag--solo {
   margin-bottom: 0.25rem;
 }
 
+.chat-bubble__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.25rem;
+}
+
+.chat-bubble__top .chat-label {
+  margin-bottom: 0;
+}
+
+.chat-tts-btn {
+  flex-shrink: 0;
+  font-family: inherit;
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.2rem 0.45rem;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--border) 90%, transparent);
+  background: color-mix(in srgb, var(--surface) 85%, transparent);
+  color: var(--ink);
+  cursor: pointer;
+  transition:
+    border-color var(--dur) var(--ease),
+    background var(--dur) var(--ease);
+}
+
+.chat-tts-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.chat-tts-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .chat-bubble p {
   margin: 0;
   font-size: 0.9rem;
