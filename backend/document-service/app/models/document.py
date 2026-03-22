@@ -33,6 +33,12 @@ class Document(Base):
     storage_path: Mapped[str] = mapped_column(String(1024), nullable=False)
     # Одинаковая тематика (несколько файлов) — общий id; у одиночных документов NULL
     topic_group_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
+    # Копия из чужого документа по общей ссылке (дедуп импорта на пользователя)
+    imported_from_document_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=True,
+        index=True,
+    )
     status: Mapped[str] = mapped_column(String(32), nullable=False, default=DocumentStatus.pending.value)
     status_message: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     created_at: Mapped[datetime] = mapped_column(

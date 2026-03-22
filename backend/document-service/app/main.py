@@ -9,6 +9,7 @@ from app.api.v1.documents import router as documents_router
 from app.db.session import Base, engine
 from app.models import Document  # noqa: F401
 from app.models.collection import DocumentCollection, DocumentCollectionMember  # noqa: F401
+from app.models.collection_share import CollectionShareLink, CollectionShareLinkCollection  # noqa: F401
 
 
 def _ensure_topic_group_column() -> None:
@@ -23,10 +24,30 @@ def _ensure_topic_group_column() -> None:
         )
 
 
+def _ensure_import_from_column() -> None:
+    with engine.begin() as conn:
+        conn.execute(
+            text("ALTER TABLE documents ADD COLUMN IF NOT EXISTS imported_from_document_id UUID"),
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_documents_imported_from ON documents (imported_from_document_id)",
+            ),
+        )
+        conn.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_documents_user_import_source "
+                "ON documents (user_id, imported_from_document_id) "
+                "WHERE imported_from_document_id IS NOT NULL",
+            ),
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
     _ensure_topic_group_column()
+    _ensure_import_from_column()
     async with httpx.AsyncClient(timeout=60.0) as client:
         app.state.http_client = client
         yield

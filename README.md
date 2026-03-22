@@ -60,10 +60,10 @@ docker compose up -d --build
 
 - **api-gateway:** прокси на `/api/v1/auth/*`, `/api/v1/documents/*`, `/api/v1/rag/*`, `/api/v1/ai/*`; `GET /api/v1/stock-image/photo` — стоковое фото по поисковой фразе (Pexels при `PEXELS_API_KEY`, иначе Openverse, затем Picsum)
 - **auth-service:** JWT, register / login / refresh / logout
-- **document-service:** загрузка PDF/DOCX/PPTX/TXT, метаданные в БД, вызов **rag** `ingest` после сохранения
+- **document-service:** загрузка PDF/DOCX/PPTX/TXT, метаданные в БД, вызов **rag** `ingest` после сохранения; коллекции (метки) и **read-only ссылки** `/share/{token}` на набор меток для команды
 - **rag-service:** `ingest` — извлечение текста (pypdf / python-docx / **python-pptx** / TXT), чанкинг (**LangChain** `RecursiveCharacterTextSplitter` или **LlamaIndex** `SentenceSplitter`, см. `RAG_CHUNKER` в `.env.example`); **чанки в PostgreSQL**; поиск — **TF-IDF** или **эмбеддер** (`EMBEDDER_BASE_URL`); `index` / `query`
 - **ai-service:** `POST /api/v1/ai/chat` — Mistral SDK или OpenAI-совместимый HTTP (`LLM_MODE`, см. [`docs/MISTRAL_MODELS.md`](docs/MISTRAL_MODELS.md)); `POST /api/v1/ai/extract-table` — CSV по тексту из RAG; при **`STT_BASE_URL`** — `POST /api/v1/ai/transcribe`
-- **frontend:** Vite + React — главная, `/login`, `/register`, `/upload`, **`/workspace/:documentId`** (рабочая область: кратко, чат по документу с источниками, тесты, карточки; `/chat` редиректит на загрузку)
+- **frontend:** Vite + React — главная, `/login`, `/register`, `/upload`, **`/workspace/:documentId`**, **`/share/:token`** (общая коллекция без входа), `/chat` редиректит на загрузку
 
 Проверка auth: `POST http://localhost:8000/api/v1/auth/register` с JSON `{"email":"a@b.c","password":"password12"}`.
 

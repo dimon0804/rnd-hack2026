@@ -9,6 +9,8 @@
 - `GET /api/v1/documents/{id}` — карточка документа
 - `GET /api/v1/documents/{id}/file` — скачать оригинальный файл (те же права, что у карточки)
 - **Коллекции** (папки пользователя: «Работа», «Учёба»…): `GET|POST /api/v1/documents/collections`, `PATCH|DELETE /api/v1/documents/collections/{id}`, `PATCH /api/v1/documents/{id}/collections` (тело `{ "collection_ids": ["uuid", ...] }`). Список документов: `GET /api/v1/documents?collection_id=uuid`. При загрузке: form-поле `collection_ids` — JSON-массив uuid.
+- **Общая read-only ссылка для команды** (учёба, хакатон): `POST /api/v1/documents/collections/share` (JWT) — тело `{ "collection_ids": ["uuid", ...], "title": "опционально" }`, ответ `{ "token", "url_path": "/share/{token}" }`. Список и отзыв: `GET|DELETE /api/v1/documents/collections/shares` и `DELETE .../shares/{token}`. **Без JWT:** `GET /api/v1/documents/shared/{token}` — метаданные и документы; `GET .../shared/{token}/file/{document_id}` — скачивание оригинала (только если файл в одной из меток ссылки). С **JWT владельца** в том же `GET .../shared/{token}` в ответе `viewer_role: "owner"` (иначе `viewer`) — для UI «открыть у себя» с рабочей областью.
+- **Импорт гостю в рабочую область:** `POST /api/v1/documents/shared/{token}/import/{document_id}` (JWT не владельца) — копия файла в «Мои документы» пользователя, вызов RAG ingest; повтор — тот же документ (дедуп по `imported_from_document_id`). Владельцу возвращается исходный документ без копии.
 
 ## Переменные окружения
 

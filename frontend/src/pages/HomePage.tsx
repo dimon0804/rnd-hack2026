@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { KnowledgeVisual } from "../components/KnowledgeVisual";
 import { Marginalia } from "../components/Marginalia";
+import { ShareLinkOpener } from "../components/ShareLinkOpener";
 import { useAuth } from "../context/AuthContext";
 
 export function HomePage() {
@@ -50,6 +51,8 @@ export function HomePage() {
               После регистрации вы сможете загружать файлы и видеть их в разделе «Мои документы».
             </p>
           ) : null}
+
+          <ShareLinkOpener variant="hero" />
 
           <div className="home-cards">
             <article className="home-card">
