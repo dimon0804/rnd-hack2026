@@ -1,0 +1,12 @@
+# Сборка статики frontend + nginx (конфиг монтируется с хоста при запуске).
+FROM node:20-bookworm-slim AS frontend-build
+WORKDIR /app
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY frontend .
+# Пустой VITE_API_BASE — запросы к /api с того же origin (см. vite и api-клиенты).
+ENV VITE_API_BASE=
+RUN npm run build
+
+FROM nginx:1.27-alpine
+COPY --from=frontend-build /app/dist /usr/share/nginx/html

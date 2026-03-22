@@ -1,4 +1,5 @@
 .env
+docker/nginx/nginx.prod.conf
 .venv/
 __pycache__/
 *.py[cod]

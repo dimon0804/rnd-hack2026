@@ -1,0 +1,185 @@
+# Продакшен: только 80/443 наружу; БД и Redis без публикации портов.
+# Запуск: см. scripts/deploy-server.sh
+#
+# docker compose -f docker-compose.prod.yml --env-file .env up -d --build
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ai-platform-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-ai_platform}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-app} -d ${POSTGRES_DB:-ai_platform}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: ai-platform-redis
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  adminer:
+    image: adminer:4
+    container_name: ai-platform-adminer
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ADMINER_DEFAULT_SERVER: postgres
+
+  auth-service:
+    build:
+      context: ./backend/auth-service
+      dockerfile: Dockerfile
+    container_name: ai-platform-auth-service
+    restart: unless-stopped
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_USER: ${POSTGRES_USER:-app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-ai_platform}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-dev-jwt-secret-change-in-production-min-32-chars}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-15}
+      REFRESH_TOKEN_EXPIRE_DAYS: ${REFRESH_TOKEN_EXPIRE_DAYS:-7}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  rag-service:
+    build:
+      context: ./backend/rag-service
+      dockerfile: Dockerfile
+    container_name: ai-platform-rag-service
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - document_uploads:/data/uploads
+    environment:
+      UPLOAD_DIR: /data/uploads
+      RAG_ENABLE_DB: ${RAG_ENABLE_DB:-true}
+      POSTGRES_HOST: postgres
+      POSTGRES_USER: ${POSTGRES_USER:-app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-ai_platform}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      EMBEDDER_BASE_URL: ${EMBEDDER_BASE_URL:-}
+      EMBEDDER_MODEL: ${EMBEDDER_MODEL:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  document-service:
+    build:
+      context: ./backend/document-service
+      dockerfile: Dockerfile
+    container_name: ai-platform-document-service
+    restart: unless-stopped
+    volumes:
+      - document_uploads:/data/uploads
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_USER: ${POSTGRES_USER:-app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-ai_platform}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-dev-jwt-secret-change-in-production-min-32-chars}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+      RAG_SERVICE_URL: ${RAG_SERVICE_URL:-http://rag-service:8003}
+      AI_SERVICE_URL: ${AI_SERVICE_URL:-http://ai-service:8004}
+      UPLOAD_DIR: /data/uploads
+      ALLOW_ANONYMOUS_UPLOAD: ${ALLOW_ANONYMOUS_UPLOAD:-true}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      auth-service:
+        condition: service_started
+      rag-service:
+        condition: service_started
+      ai-service:
+        condition: service_started
+
+  ai-service:
+    build:
+      context: ./backend/ai-service
+      dockerfile: Dockerfile
+    container_name: ai-platform-ai-service
+    restart: unless-stopped
+    environment:
+      LLM_MODE: ${LLM_MODE:-mistral_sdk}
+      MISTRAL_API_KEY: ${MISTRAL_API_KEY:-}
+      MISTRAL_BASE_URL: ${MISTRAL_BASE_URL:-https://api.mistral.ai}
+      MISTRAL_CHAT_MODEL: ${MISTRAL_CHAT_MODEL:-mistral-small-latest}
+      AI_REQUEST_TIMEOUT_SECONDS: ${AI_REQUEST_TIMEOUT_SECONDS:-120}
+      STT_BASE_URL: ${STT_BASE_URL:-}
+      STT_API_KEY: ${STT_API_KEY:-}
+      STT_MODEL: ${STT_MODEL:-}
+      STT_TIMEOUT_SECONDS: ${STT_TIMEOUT_SECONDS:-180}
+
+  api-gateway:
+    build:
+      context: ./backend/api-gateway
+      dockerfile: Dockerfile
+    container_name: ai-platform-api-gateway
+    restart: unless-stopped
+    environment:
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://rnd-hack.clv-digital.tech}
+      PEXELS_API_KEY: ${PEXELS_API_KEY:-}
+      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-120}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      AUTH_SERVICE_URL: ${AUTH_SERVICE_URL:-http://auth-service:8001}
+      DOCUMENT_SERVICE_URL: ${DOCUMENT_SERVICE_URL:-http://document-service:8002}
+      RAG_SERVICE_URL: ${RAG_SERVICE_URL:-http://rag-service:8003}
+      AI_SERVICE_URL: ${AI_SERVICE_URL:-http://ai-service:8004}
+    depends_on:
+      redis:
+        condition: service_healthy
+      auth-service:
+        condition: service_started
+      document-service:
+        condition: service_started
+      rag-service:
+        condition: service_started
+      ai-service:
+        condition: service_started
+
+  nginx:
+    build:
+      context: .
+      dockerfile: docker/nginx/Dockerfile.prod
+    image: rnd-hack-nginx:${IMAGE_TAG:-latest}
+    container_name: ai-platform-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/nginx/nginx.prod.conf:/etc/nginx/nginx.conf:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - /var/www/certbot:/var/www/certbot:ro
+    depends_on:
+      api-gateway:
+        condition: service_started
+
+volumes:
+  postgres_data:
+  redis_data:
+  document_uploads:
