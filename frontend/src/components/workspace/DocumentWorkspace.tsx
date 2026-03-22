@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import type { CollectionItem, DocumentItem } from "../../api/documents";
 import { listCollections, listDocuments } from "../../api/documents";
 import { aiChat } from "../../api/ai";
@@ -38,6 +38,14 @@ import { ProcessingOverlay } from "./ProcessingOverlay";
 import { SttChatToolbar } from "../SttChatToolbar";
 import { DocumentCollectionChips } from "../DocumentCollectionChips";
 import { formatBriefChatHistory } from "../../lib/formatChatHistory";
+import {
+  clearPersistedMessages,
+  loadPersistedMessages,
+  savePersistedMessages,
+  workspaceChatStorageKey,
+  type PersistedMsg,
+} from "../../lib/persistedChat";
+import { fetchSuggestedChatQuestions, type SuggestedQuestions } from "../../lib/suggestedChatQuestions";
 
 type Tab =
   | "summary"
@@ -132,6 +140,13 @@ export function DocumentWorkspace({ document }: Props) {
     [document.id]: document.original_filename,
   }));
   const [collections, setCollections] = useState<CollectionItem[]>([]);
+  const [suggestedBlock, setSuggestedState] = useState<{
+    data: SuggestedQuestions | null;
+    loading: boolean;
+    err: string | null;
+  }>({ data: null, loading: false, err: null });
+  /** Подсказки-вопросы свёрнуты по умолчанию — открываются кнопкой, скрываются при вводе, выборе вопроса или вручную. */
+  const [faqSuggestionsOpen, setFaqSuggestionsOpen] = useState(false);
 
   const st = document.status.trim().toLowerCase();
   const ready = st === "ready";
@@ -142,6 +157,63 @@ export function DocumentWorkspace({ document }: Props) {
     () => (document.group_document_ids?.length ? document.group_document_ids : [document.id]),
     [document.id, document.group_document_ids],
   );
+
+  const chatStorageKey = useMemo(() => workspaceChatStorageKey(ragIds), [ragIds]);
+  const skipChatSaveRef = useRef(true);
+
+  useEffect(() => {
+    setSuggestedState({ data: null, loading: false, err: null });
+    setFaqSuggestionsOpen(false);
+  }, [chatStorageKey]);
+
+  useEffect(() => {
+    if (chatInput.trim().length > 0) {
+      setFaqSuggestionsOpen(false);
+    }
+  }, [chatInput]);
+
+  useEffect(() => {
+    skipChatSaveRef.current = true;
+    const loaded = loadPersistedMessages(chatStorageKey) as Msg[];
+    setMessages(
+      loaded.map((m) => ({
+        role: m.role,
+        content: m.content,
+      })),
+    );
+  }, [chatStorageKey]);
+
+  useEffect(() => {
+    if (skipChatSaveRef.current) {
+      skipChatSaveRef.current = false;
+      return;
+    }
+    const t = window.setTimeout(() => {
+      const plain: PersistedMsg[] = messages.map(({ role, content }) => ({ role, content }));
+      savePersistedMessages(chatStorageKey, plain);
+    }, 450);
+    return () => window.clearTimeout(t);
+  }, [chatStorageKey, messages]);
+
+  useEffect(() => {
+    if (!ready || !summary?.trim()) return;
+    let cancelled = false;
+    setSuggestedState((s) => ({ ...s, loading: true, err: null }));
+    void fetchSuggestedChatQuestions(summary, topics, authFetch)
+      .then((r) => {
+        if (!cancelled) {
+          setSuggestedState({ data: r, loading: false, err: null });
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setSuggestedState({ data: { popular: [], chatty: [] }, loading: false, err: "Не удалось загрузить подсказки" });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [ready, summary, topics, ragIds, authFetch]);
 
   useEffect(() => {
     let cancelled = false;
@@ -222,9 +294,10 @@ export function DocumentWorkspace({ document }: Props) {
     };
   }, [videoPlan, authFetch]);
 
-  const sendChat = async () => {
-    const text = chatInput.trim();
+  const sendChat = async (presetText?: string) => {
+    const text = (presetText ?? chatInput).trim();
     if (!text || chatBusy || !ready || sttBusy) return;
+    setFaqSuggestionsOpen(false);
     const priorThread = messages;
     setChatInput("");
     setMessages((m) => [...m, { role: "user", content: text }]);
@@ -267,6 +340,7 @@ export function DocumentWorkspace({ document }: Props) {
 
   const runPromptTemplate = async (id: PromptTemplateId) => {
     if (!ready || chatBusy || sttBusy) return;
+    setFaqSuggestionsOpen(false);
     const t = PROMPT_TEMPLATES[id];
     const priorThread = messages;
     setTab("chat");
@@ -837,7 +911,109 @@ export function DocumentWorkspace({ document }: Props) {
                     {PROMPT_TEMPLATES[tid].label}
                   </button>
                 ))}
+                <button
+                  type="button"
+                  className="btn-text chat-templates__clear"
+                  disabled={!ready || chatBusy || messages.length === 0}
+                  title="Удалить сохранённый диалог для этого документа"
+                  onClick={() => {
+                    clearPersistedMessages(chatStorageKey);
+                    setMessages([]);
+                  }}
+                >
+                  Очистить историю
+                </button>
               </div>
+              {ready && (loadingInsights || !!summary?.trim()) ? (
+                <div className="chat-faq">
+                  <button
+                    type="button"
+                    className="chat-faq__toggle"
+                    onClick={() => setFaqSuggestionsOpen((o) => !o)}
+                    aria-expanded={faqSuggestionsOpen}
+                    aria-controls="workspace-faq-panel"
+                    id="workspace-faq-toggle"
+                  >
+                    <span className="chat-faq__toggle-label">Часто задаваемые и популярные вопросы</span>
+                    <span className="chat-faq__chevron" aria-hidden>
+                      {faqSuggestionsOpen ? "▲" : "▼"}
+                    </span>
+                  </button>
+                  {faqSuggestionsOpen ? (
+                    <div
+                      id="workspace-faq-panel"
+                      className="chat-suggested chat-suggested--collapsible"
+                      role="region"
+                      aria-labelledby="workspace-faq-toggle"
+                      aria-busy={suggestedBlock.loading}
+                    >
+                      <div className="chat-suggested__head chat-suggested__head--with-close">
+                        <span className="chat-suggested__title">По документу</span>
+                        <div className="chat-suggested__head-meta">
+                          {suggestedBlock.loading ? (
+                            <span className="chat-suggested__status">Подбираем…</span>
+                          ) : null}
+                          {suggestedBlock.err ? (
+                            <span className="chat-suggested__err">{suggestedBlock.err}</span>
+                          ) : null}
+                        </div>
+                        <button
+                          type="button"
+                          className="chat-suggested__close"
+                          onClick={() => setFaqSuggestionsOpen(false)}
+                          aria-label="Свернуть список вопросов"
+                        >
+                          ×
+                        </button>
+                      </div>
+                      {suggestedBlock.data?.popular && suggestedBlock.data.popular.length > 0 ? (
+                        <div className="chat-suggested__row">
+                          <span className="chat-suggested__label">Популярные</span>
+                          <div className="chat-suggested__chips" role="list">
+                            {suggestedBlock.data.popular.map((q) => (
+                              <button
+                                key={`p-${q}`}
+                                type="button"
+                                className="chat-suggested__chip"
+                                role="listitem"
+                                disabled={chatBusy || sttBusy}
+                                onClick={() => void sendChat(q)}
+                              >
+                                {q}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+                      {suggestedBlock.data?.chatty && suggestedBlock.data.chatty.length > 0 ? (
+                        <div className="chat-suggested__row">
+                          <span className="chat-suggested__label">В чате</span>
+                          <div className="chat-suggested__chips" role="list">
+                            {suggestedBlock.data.chatty.map((q) => (
+                              <button
+                                key={`c-${q}`}
+                                type="button"
+                                className="chat-suggested__chip chat-suggested__chip--chatty"
+                                role="listitem"
+                                disabled={chatBusy || sttBusy}
+                                onClick={() => void sendChat(q)}
+                              >
+                                {q}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+                      {!suggestedBlock.loading &&
+                      !suggestedBlock.data?.popular?.length &&
+                      !suggestedBlock.data?.chatty?.length &&
+                      summary?.trim() ? (
+                        <p className="chat-suggested__empty muted">Подсказки появятся после описания документа.</p>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
               <div className="chat-scroll">
                 <div className="chat-thread">
                   {messages.map((msg, i) => (

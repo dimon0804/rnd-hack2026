@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Link } from "react-router-dom";
 import { aiChat } from "../api/ai";
 import { listDocuments } from "../api/documents";
@@ -6,6 +6,14 @@ import type { RagChunk } from "../api/rag";
 import { formatRagChunksForLlm, ragQuery, ragQueryBalanced } from "../api/rag";
 import { humanizeChatError } from "../lib/apiError";
 import { formatBriefChatHistory } from "../lib/formatChatHistory";
+import {
+  chatPanelStorageKey,
+  clearPersistedMessages,
+  loadPersistedMessages,
+  savePersistedMessages,
+  type PersistedMsg,
+} from "../lib/persistedChat";
+import { fetchSuggestedChatQuestions, type SuggestedQuestions } from "../lib/suggestedChatQuestions";
 import { hydrateChunkTextsFromDocuments } from "../lib/ragChunkHydrate";
 import { useAuth } from "../context/AuthContext";
 import { SttChatToolbar } from "./SttChatToolbar";
@@ -42,13 +50,73 @@ function buildSystemPrompt(
 }
 
 export function ChatPanel() {
-  const { authFetch } = useAuth();
+  const { authFetch, email } = useAuth();
+  const chatStorageKey = useMemo(() => chatPanelStorageKey(email), [email]);
+  const skipChatSaveRef = useRef(true);
+
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [lastChunks, setLastChunks] = useState<RagChunk[]>([]);
   const [readyCount, setReadyCount] = useState<number | null>(null);
   const [sttBusy, setSttBusy] = useState(false);
+  const [suggestedBlock, setSuggestedBlock] = useState<{
+    data: SuggestedQuestions | null;
+    loading: boolean;
+    err: string | null;
+  }>({ data: null, loading: false, err: null });
+  const [faqSuggestionsOpen, setFaqSuggestionsOpen] = useState(false);
+
+  useEffect(() => {
+    if (input.trim().length > 0) {
+      setFaqSuggestionsOpen(false);
+    }
+  }, [input]);
+
+  useEffect(() => {
+    skipChatSaveRef.current = true;
+    setMessages(loadPersistedMessages(chatStorageKey) as Msg[]);
+  }, [chatStorageKey]);
+
+  useEffect(() => {
+    if (skipChatSaveRef.current) {
+      skipChatSaveRef.current = false;
+      return;
+    }
+    const t = window.setTimeout(() => {
+      const plain: PersistedMsg[] = messages.map(({ role, content }) => ({ role, content }));
+      savePersistedMessages(chatStorageKey, plain);
+    }, 450);
+    return () => window.clearTimeout(t);
+  }, [chatStorageKey, messages]);
+
+  useEffect(() => {
+    if (readyCount === null || readyCount === 0) {
+      setSuggestedBlock({ data: null, loading: false, err: null });
+      setFaqSuggestionsOpen(false);
+      return;
+    }
+    let cancelled = false;
+    setSuggestedBlock({ data: null, loading: true, err: null });
+    void (async () => {
+      try {
+        const docs = await listDocuments(authFetch);
+        const readyDocs = docs.filter(isReady);
+        const names = readyDocs.map((d) => d.original_filename);
+        const summary = `Пользователь задаёт вопросы сразу по всем проиндексированным файлам (${readyDocs.length} шт.): ${names.join("; ")}.`;
+        const r = await fetchSuggestedChatQuestions(summary, names.slice(0, 12), authFetch);
+        if (!cancelled) setSuggestedBlock({ data: r, loading: false, err: null });
+      } catch {
+        if (!cancelled) {
+          setSuggestedBlock({ data: { popular: [], chatty: [] }, loading: false, err: "Не удалось загрузить подсказки" });
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [readyCount, authFetch]);
+
   const refreshReadyCount = useCallback(async () => {
     try {
       const docs = await listDocuments(authFetch);
@@ -62,9 +130,10 @@ export function ChatPanel() {
     void refreshReadyCount();
   }, [refreshReadyCount]);
 
-  const send = async () => {
-    const text = input.trim();
+  const send = async (presetText?: string) => {
+    const text = (presetText ?? input).trim();
     if (!text || busy || sttBusy) return;
+    setFaqSuggestionsOpen(false);
     const priorThread = messages;
     setInput("");
     setMessages((m) => [...m, { role: "user", content: text }]);
@@ -133,6 +202,18 @@ export function ChatPanel() {
           <Link to="/upload" style={styles.linkBtn}>
             Загрузить ещё
           </Link>
+          <button
+            type="button"
+            style={styles.clearBtn}
+            disabled={messages.length === 0}
+            title="Удалить сохранённый диалог на этом устройстве"
+            onClick={() => {
+              clearPersistedMessages(chatStorageKey);
+              setMessages([]);
+            }}
+          >
+            Очистить историю
+          </button>
         </div>
       </header>
 
@@ -140,6 +221,88 @@ export function ChatPanel() {
         <div style={styles.warnBanner}>
           <strong>Нет готовых документов.</strong> Загрузите файл и дождитесь статуса ready — тогда чат сможет опираться на
           текст.
+        </div>
+      ) : null}
+
+      {readyCount !== null && readyCount > 0 ? (
+        <div className="chat-faq" style={styles.faqOuter}>
+          <button
+            type="button"
+            className="chat-faq__toggle"
+            onClick={() => setFaqSuggestionsOpen((o) => !o)}
+            aria-expanded={faqSuggestionsOpen}
+            aria-controls="chat-page-faq-panel"
+            id="chat-page-faq-toggle"
+          >
+            <span className="chat-faq__toggle-label">Часто задаваемые и популярные вопросы</span>
+            <span className="chat-faq__chevron" aria-hidden>
+              {faqSuggestionsOpen ? "▲" : "▼"}
+            </span>
+          </button>
+          {faqSuggestionsOpen ? (
+            <div
+              id="chat-page-faq-panel"
+              className="chat-suggested chat-suggested--collapsible"
+              role="region"
+              aria-labelledby="chat-page-faq-toggle"
+              aria-busy={suggestedBlock.loading}
+              style={styles.suggestedPanel}
+            >
+              <div className="chat-suggested__head chat-suggested__head--with-close">
+                <span className="chat-suggested__title">По вашим файлам</span>
+                <div className="chat-suggested__head-meta">
+                  {suggestedBlock.loading ? <span className="chat-suggested__status">Подбираем…</span> : null}
+                  {suggestedBlock.err ? <span className="chat-suggested__err">{suggestedBlock.err}</span> : null}
+                </div>
+                <button
+                  type="button"
+                  className="chat-suggested__close"
+                  onClick={() => setFaqSuggestionsOpen(false)}
+                  aria-label="Свернуть список вопросов"
+                >
+                  ×
+                </button>
+              </div>
+              {suggestedBlock.data?.popular && suggestedBlock.data.popular.length > 0 ? (
+                <div className="chat-suggested__row">
+                  <span className="chat-suggested__label">Популярные</span>
+                  <div className="chat-suggested__chips" role="list">
+                    {suggestedBlock.data.popular.map((q) => (
+                      <button
+                        key={`p-${q}`}
+                        type="button"
+                        className="chat-suggested__chip"
+                        role="listitem"
+                        disabled={busy || sttBusy}
+                        onClick={() => void send(q)}
+                      >
+                        {q}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+              {suggestedBlock.data?.chatty && suggestedBlock.data.chatty.length > 0 ? (
+                <div className="chat-suggested__row">
+                  <span className="chat-suggested__label">В чате</span>
+                  <div className="chat-suggested__chips" role="list">
+                    {suggestedBlock.data.chatty.map((q) => (
+                      <button
+                        key={`c-${q}`}
+                        type="button"
+                        className="chat-suggested__chip chat-suggested__chip--chatty"
+                        role="listitem"
+                        disabled={busy || sttBusy}
+                        onClick={() => void send(q)}
+                      >
+                        {q}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       ) : null}
 
@@ -279,6 +442,26 @@ const styles: Record<string, CSSProperties> = {
     fontWeight: 600,
     fontSize: "0.88rem",
     textDecoration: "none",
+  },
+  clearBtn: {
+    padding: "8px 12px",
+    borderRadius: 10,
+    border: "1px solid color-mix(in srgb, var(--border) 90%, transparent)",
+    background: "transparent",
+    color: "var(--muted)",
+    fontSize: "0.82rem",
+    fontWeight: 600,
+    cursor: "pointer",
+  },
+  faqOuter: {
+    borderRadius: "var(--radius)",
+    border: "1px solid var(--border)",
+    overflow: "hidden",
+  },
+  suggestedPanel: {
+    margin: 0,
+    borderRadius: 0,
+    border: "none",
   },
   warnBanner: {
     padding: "12px 16px",
