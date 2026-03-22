@@ -28,6 +28,28 @@ def sanitize_filename(name: str) -> str:
     return base or "file"
 
 
+def read_document_bytes(storage_path: str) -> bytes:
+    """Прочитать файл из UPLOAD_DIR по относительному storage_path (как в Document)."""
+    root = Path(settings.upload_dir).resolve()
+    rel = storage_path.replace("\\", "/").lstrip("/")
+    try:
+        full = (root / rel).resolve()
+    except (OSError, ValueError) as e:
+        raise ValueError("Invalid storage path") from e
+    if not str(full).startswith(str(root)):
+        raise ValueError("Invalid storage path")
+    if not full.is_file():
+        raise FileNotFoundError("File not found on disk")
+    return full.read_bytes()
+
+
+async def copy_document_file_to_new_id(src_storage_path: str, original_filename: str, new_id: uuid.UUID) -> str:
+    """Скопировать байты в новый каталог документа (для импорта из общей ссылки)."""
+    data = read_document_bytes(src_storage_path)
+    validate_size(len(data))
+    return await save_upload(new_id, original_filename, data)
+
+
 async def save_upload(document_id: uuid.UUID, filename: str, data: bytes) -> str:
     root = Path(settings.upload_dir) / str(document_id)
     root.mkdir(parents=True, exist_ok=True)

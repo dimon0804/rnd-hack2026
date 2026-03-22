@@ -2,23 +2,31 @@ import logging
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Literal
 
 import httpx
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile, status
 from fastapi.responses import FileResponse
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.db.session import get_db
 from app.dependencies.auth import get_current_user_id_optional, require_user_or_anonymous
 from app.models.collection import DocumentCollection, DocumentCollectionMember
+from app.models.collection_share import CollectionShareLink, CollectionShareLinkCollection
 from app.models.document import Document, DocumentStatus
 from app.schemas.collections import (
     CollectionCreate,
     CollectionRename,
     CollectionResponse,
+    CollectionShareCreate,
+    CollectionShareCreated,
+    CollectionShareSummary,
     DocumentCollectionsBody,
+    SharedCollectionLabel,
+    SharedCollectionView,
 )
 from app.schemas.document import (
     BatchUploadItem,
@@ -44,7 +52,7 @@ from app.services.collection_links import (
     set_document_collection_links,
 )
 from app.services.rag_client import notify_ingest_safe
-from app.services.storage import allowed_mime, save_upload, validate_size
+from app.services.storage import allowed_mime, copy_document_file_to_new_id, save_upload, validate_size
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +95,66 @@ def _group_ids_for(db: Session, doc: Document) -> list[uuid.UUID]:
         q = q.where(Document.user_id.is_(None))
     rows = db.scalars(q.order_by(Document.created_at.asc())).all()
     return list(rows)
+
+
+def _file_response_for_document(doc: Document) -> FileResponse:
+    root = Path(settings.upload_dir).resolve()
+    rel = doc.storage_path.replace("\\", "/").lstrip("/")
+    try:
+        full = (root / rel).resolve()
+    except (OSError, ValueError) as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Invalid storage path") from e
+    if not str(full).startswith(str(root)):
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Invalid storage path")
+    if not full.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found on disk")
+
+    return FileResponse(
+        path=str(full),
+        filename=doc.original_filename,
+        media_type=doc.mime_type or "application/octet-stream",
+    )
+
+
+def _active_share_or_404(
+    db: Session,
+    token: uuid.UUID,
+) -> CollectionShareLink:
+    link = db.get(CollectionShareLink, token)
+    if link is None or link.revoked_at is not None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ссылка не найдена или отозвана")
+    return link
+
+
+def _collection_ids_for_share(db: Session, link_id: uuid.UUID) -> list[uuid.UUID]:
+    return list(
+        db.scalars(
+            select(CollectionShareLinkCollection.collection_id).where(
+                CollectionShareLinkCollection.link_id == link_id,
+            ),
+        ).all(),
+    )
+
+
+def _documents_for_shared_collections(
+    db: Session,
+    owner_id: int,
+    collection_ids: list[uuid.UUID],
+) -> list[Document]:
+    if not collection_ids:
+        return []
+    subq = select(DocumentCollectionMember.document_id).where(
+        DocumentCollectionMember.collection_id.in_(collection_ids),
+    )
+    q = (
+        select(Document)
+        .where(
+            Document.user_id == owner_id,
+            Document.id.in_(subq),
+        )
+        .order_by(Document.created_at.desc())
+    )
+    return list(db.scalars(q).all())
 
 
 def build_document_response(
@@ -182,6 +250,225 @@ def delete_collection(
     db.delete(col)
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/collections/share", response_model=CollectionShareCreated)
+def create_collection_share(
+    body: CollectionShareCreate,
+    db: Session = Depends(get_db),
+    user_id: int | None = Depends(require_user_or_anonymous),
+) -> CollectionShareCreated:
+    if user_id is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Войдите, чтобы создать ссылку")
+    raw_ids = list(dict.fromkeys(body.collection_ids))
+    cols: list[DocumentCollection] = []
+    for cid in raw_ids:
+        c = db.get(DocumentCollection, cid)
+        if c is None or c.user_id != user_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Коллекция не найдена")
+        cols.append(c)
+    link = CollectionShareLink(
+        user_id=user_id,
+        title=(body.title.strip() if body.title and body.title.strip() else None),
+    )
+    db.add(link)
+    db.flush()
+    for c in cols:
+        db.add(CollectionShareLinkCollection(link_id=link.id, collection_id=c.id))
+    db.commit()
+    db.refresh(link)
+    return CollectionShareCreated(token=link.id, url_path=f"/share/{link.id}")
+
+
+@router.get("/collections/shares", response_model=list[CollectionShareSummary])
+def list_collection_shares(
+    db: Session = Depends(get_db),
+    user_id: int | None = Depends(require_user_or_anonymous),
+) -> list[CollectionShareSummary]:
+    if user_id is None:
+        return []
+    rows = db.scalars(
+        select(CollectionShareLink)
+        .where(CollectionShareLink.user_id == user_id)
+        .order_by(CollectionShareLink.created_at.desc()),
+    ).all()
+    out: list[CollectionShareSummary] = []
+    for row in rows:
+        cids = _collection_ids_for_share(db, row.id)
+        out.append(
+            CollectionShareSummary(
+                id=row.id,
+                title=row.title,
+                created_at=row.created_at,
+                revoked_at=row.revoked_at,
+                collection_ids=cids,
+            ),
+        )
+    return out
+
+
+@router.delete("/collections/shares/{token}", status_code=status.HTTP_204_NO_CONTENT)
+def revoke_collection_share(
+    token: uuid.UUID,
+    db: Session = Depends(get_db),
+    user_id: int | None = Depends(require_user_or_anonymous),
+) -> Response:
+    if user_id is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+    link = db.get(CollectionShareLink, token)
+    if link is None or link.user_id != user_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ссылка не найдена")
+    if link.revoked_at is None:
+        link.revoked_at = datetime.now(timezone.utc)
+        db.add(link)
+        db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/shared/{token}", response_model=SharedCollectionView)
+def get_shared_collection_view(
+    token: uuid.UUID,
+    db: Session = Depends(get_db),
+    user_id: int | None = Depends(get_current_user_id_optional),
+) -> SharedCollectionView:
+    link = _active_share_or_404(db, token)
+    cids = _collection_ids_for_share(db, link.id)
+    if not cids:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="В ссылке нет коллекций")
+    col_rows = [db.get(DocumentCollection, cid) for cid in cids]
+    labels = [
+        SharedCollectionLabel(id=c.id, name=c.name)
+        for c in col_rows
+        if c is not None and c.user_id == link.user_id
+    ]
+    docs = _documents_for_shared_collections(db, link.user_id, cids)
+    batch = batch_collection_ids_map(db, [d.id for d in docs])
+    viewer_role: Literal["viewer", "owner"] = (
+        "owner" if user_id is not None and user_id == link.user_id else "viewer"
+    )
+    return SharedCollectionView(
+        title=link.title,
+        collections=labels,
+        documents=[build_document_response(db, d, batch.get(d.id, [])) for d in docs],
+        viewer_role=viewer_role,
+    )
+
+
+@router.post("/shared/{token}/import/{document_id}", response_model=DocumentResponse)
+async def import_shared_document(
+    token: uuid.UUID,
+    document_id: uuid.UUID,
+    request: Request,
+    db: Session = Depends(get_db),
+    user_id: int | None = Depends(get_current_user_id_optional),
+) -> DocumentResponse:
+    """Скопировать файл из общей ссылки в аккаунт текущего пользователя и проиндексировать — дальше `/workspace/{id}`."""
+    if user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Войдите, чтобы добавить файл к себе и открыть рабочую область",
+        )
+    link = _active_share_or_404(db, token)
+    cids = _collection_ids_for_share(db, link.id)
+    if not cids:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ссылка недействительна")
+    src = db.get(Document, document_id)
+    if src is None or src.user_id != link.user_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Документ не найден")
+    ok = db.scalar(
+        select(DocumentCollectionMember.collection_id).where(
+            DocumentCollectionMember.document_id == src.id,
+            DocumentCollectionMember.collection_id.in_(cids),
+        ).limit(1),
+    )
+    if ok is None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Файл не входит в эту ссылку")
+    if user_id == link.user_id:
+        batch = batch_collection_ids_map(db, [src.id])
+        return build_document_response(db, src, batch.get(src.id, []))
+    existing = db.scalar(
+        select(Document).where(
+            Document.user_id == user_id,
+            Document.imported_from_document_id == src.id,
+        ),
+    )
+    if existing is not None:
+        batch = batch_collection_ids_map(db, [existing.id])
+        return build_document_response(db, existing, batch.get(existing.id, []))
+
+    new_id = uuid.uuid4()
+    try:
+        rel = await copy_document_file_to_new_id(src.storage_path, src.original_filename, new_id)
+    except (ValueError, FileNotFoundError) as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Не удалось прочитать файл с диска",
+        ) from e
+
+    new_doc = Document(
+        id=new_id,
+        user_id=user_id,
+        original_filename=src.original_filename,
+        mime_type=src.mime_type,
+        size_bytes=src.size_bytes,
+        storage_path=rel,
+        topic_group_id=None,
+        status=DocumentStatus.pending.value,
+        imported_from_document_id=src.id,
+    )
+    db.add(new_doc)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        existing2 = db.scalar(
+            select(Document).where(
+                Document.user_id == user_id,
+                Document.imported_from_document_id == src.id,
+            ),
+        )
+        if existing2 is not None:
+            batch = batch_collection_ids_map(db, [existing2.id])
+            return build_document_response(db, existing2, batch.get(existing2.id, []))
+        raise
+    db.refresh(new_doc)
+
+    client: httpx.AsyncClient = request.app.state.http_client
+    outcome = await notify_ingest_safe(client, new_doc.id, new_doc.storage_path, new_doc.mime_type, user_id)
+    if outcome.success:
+        new_doc.status = DocumentStatus.ready.value
+        new_doc.status_message = outcome.detail[:1000] if outcome.detail else None
+    else:
+        new_doc.status = DocumentStatus.failed.value
+        new_doc.status_message = outcome.detail[:1000]
+    db.add(new_doc)
+    db.commit()
+    db.refresh(new_doc)
+    return build_document_response(db, new_doc)
+
+
+@router.get("/shared/{token}/file/{document_id}")
+def download_shared_document_file(
+    token: uuid.UUID,
+    document_id: uuid.UUID,
+    db: Session = Depends(get_db),
+) -> FileResponse:
+    link = _active_share_or_404(db, token)
+    cids = _collection_ids_for_share(db, link.id)
+    if not cids:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ссылка недействительна")
+    doc = db.get(Document, document_id)
+    if doc is None or doc.user_id != link.user_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Документ не найден")
+    ok = db.scalar(
+        select(DocumentCollectionMember.collection_id).where(
+            DocumentCollectionMember.document_id == doc.id,
+            DocumentCollectionMember.collection_id.in_(cids),
+        ).limit(1),
+    )
+    if ok is None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Файл не входит в общую коллекцию")
+    return _file_response_for_document(doc)
 
 
 @router.patch("/{document_id}/collections", response_model=DocumentResponse)
@@ -651,19 +938,4 @@ def download_document_file(
     elif not settings.allow_anonymous_upload and user_id is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
 
-    root = Path(settings.upload_dir).resolve()
-    rel = doc.storage_path.replace("\\", "/").lstrip("/")
-    try:
-        full = (root / rel).resolve()
-    except (OSError, ValueError) as e:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Invalid storage path") from e
-    if not str(full).startswith(str(root)):
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Invalid storage path")
-    if not full.is_file():
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found on disk")
-
-    return FileResponse(
-        path=str(full),
-        filename=doc.original_filename,
-        media_type=doc.mime_type or "application/octet-stream",
-    )
+    return _file_response_for_document(doc)
