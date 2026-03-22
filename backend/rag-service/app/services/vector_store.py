@@ -27,22 +27,27 @@ def _l2_normalize_rows(x: np.ndarray) -> np.ndarray:
 
 class InMemoryVectorStore:
     """
-    Хранение чанков и поиск: либо TF-IDF (по умолчанию), либо dense-эмбеддинги
-    через callback `embed_texts` (OpenAI /v1/embeddings).
+    Хранение чанков и поиск: TF-IDF (ключевые слова / n-граммы) и при наличии
+    `embed_texts` — ещё и dense-эмбеддинги (семантика). Режим запроса задаётся в `query`.
     """
 
     def __init__(self, embed_texts: Callable[[list[str]], list[list[float]]] | None = None) -> None:
         self._embed_texts = embed_texts
         self._chunks: list[StoredChunk] = []
         self._vectorizer = TfidfVectorizer(ngram_range=(1, 2), max_features=5000)
-        self._tfidf_matrix = None  # sparse, только без эмбеддера
+        self._tfidf_matrix = None  # sparse; при эмбеддере строится параллельно с эмбеддингами
         self._embed_matrix: np.ndarray | None = None  # (n, dim), строки L2-нормированы
 
     def stats(self) -> dict[str, int | str]:
         """Сводка для демо-панели: размер индекса и режим поиска."""
         n = len(self._chunks)
         docs = len({c.document_id for c in self._chunks}) if n else 0
-        mode = "embeddings" if self._embed_matrix is not None else "tfidf"
+        if self._embed_matrix is not None and self._tfidf_matrix is not None:
+            mode = "hybrid"
+        elif self._embed_matrix is not None:
+            mode = "embeddings"
+        else:
+            mode = "tfidf"
         return {"chunks_total": n, "documents_indexed": docs, "search_mode": mode}
 
     def replace_all_chunks(self, chunks: list[StoredChunk]) -> None:
@@ -72,29 +77,44 @@ class InMemoryVectorStore:
         query: str,
         top_k: int,
         allowed_document_ids: set[str] | None = None,
+        search_mode: str = "semantic",
     ) -> list[tuple[StoredChunk, float]]:
         if not self._chunks:
             return []
+
+        mode = (search_mode or "semantic").strip().lower()
+        if mode not in ("keyword", "semantic"):
+            mode = "semantic"
 
         allowed_norm: set[str] | None = None
         if allowed_document_ids is not None:
             allowed_norm = {_norm_doc_id(x) for x in allowed_document_ids}
 
-        if self._embed_matrix is not None and self._embed_texts is not None:
+        use_keyword = mode == "keyword"
+        use_embeddings = not use_keyword and self._embed_matrix is not None and self._embed_texts is not None
+
+        embed_mode: bool
+        if use_embeddings:
             q_emb = self._embed_texts([query])[0]
             q = np.asarray(q_emb, dtype=np.float32).reshape(1, -1)
             q = _l2_normalize_rows(q)
             sims = (self._embed_matrix @ q.T).ravel()
+            embed_mode = True
         elif self._tfidf_matrix is not None:
             q = self._vectorizer.transform([query])
             sims = cosine_similarity(q, self._tfidf_matrix)[0]
+            embed_mode = False
+        elif self._embed_matrix is not None and self._embed_texts is not None:
+            q_emb = self._embed_texts([query])[0]
+            q = np.asarray(q_emb, dtype=np.float32).reshape(1, -1)
+            q = _l2_normalize_rows(q)
+            sims = (self._embed_matrix @ q.T).ravel()
+            embed_mode = True
         else:
             return self._fallback_chunks_by_document(allowed_norm, top_k)
 
         if sims.size == 0:
             return self._fallback_chunks_by_document(allowed_norm, top_k)
-
-        embed_mode = self._embed_matrix is not None
         pairs: list[tuple[int, float]] = []
         for i, score in enumerate(sims):
             if allowed_norm is not None and self._chunks[i].document_id not in allowed_norm:
@@ -129,13 +149,12 @@ class InMemoryVectorStore:
             return
 
         corpus = [c.text for c in self._chunks]
+        self._tfidf_matrix = self._vectorizer.fit_transform(corpus)
 
         if self._embed_texts is None:
             self._embed_matrix = None
-            self._tfidf_matrix = self._vectorizer.fit_transform(corpus)
             return
 
-        self._tfidf_matrix = None
         vecs = self._embed_texts(corpus)
         arr = np.asarray(vecs, dtype=np.float32)
         self._embed_matrix = _l2_normalize_rows(arr)
