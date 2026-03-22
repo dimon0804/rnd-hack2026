@@ -76,6 +76,7 @@ async def lifespan(app: FastAPI):
 
     app.state.rag_store = store
     app.state.rag_service = RagService(store, chunk_repo)
+    app.state.rag_last_error = None  # dict message+at или None — для GET /api/v1/rag/status
     yield
 
 

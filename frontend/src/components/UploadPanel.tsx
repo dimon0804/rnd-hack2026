@@ -1,10 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
+  createCollection,
+  deleteCollection,
+  listCollections,
   listDocuments,
+  setDocumentCollections,
   uploadDocument,
   uploadDocumentBatch,
   type BatchUploadResult,
+  type CollectionItem,
   type DocumentItem,
   type DocumentUploadResult,
 } from "../api/documents";
@@ -53,6 +58,12 @@ export function UploadPanel() {
   const [batchResult, setBatchResult] = useState<BatchUploadResult | null>(null);
   const [docs, setDocs] = useState<DocumentItem[] | null>(null);
   const [docsPage, setDocsPage] = useState(1);
+  const [collections, setCollections] = useState<CollectionItem[]>([]);
+  const [uploadCollectionIds, setUploadCollectionIds] = useState<string[]>([]);
+  const [newCollName, setNewCollName] = useState("");
+  const [collBusy, setCollBusy] = useState(false);
+  /** Блокировка чекбоксов меток на время PATCH одного документа */
+  const [patchingDocId, setPatchingDocId] = useState<string | null>(null);
 
   const refreshList = useCallback(async () => {
     if (!isAuthenticated) {
@@ -67,10 +78,78 @@ export function UploadPanel() {
     }
   }, [isAuthenticated, authFetch]);
 
+  const refreshCollections = useCallback(async () => {
+    if (!isAuthenticated) {
+      setCollections([]);
+      return;
+    }
+    try {
+      setCollections(await listCollections(authFetch));
+    } catch {
+      setCollections([]);
+    }
+  }, [isAuthenticated, authFetch]);
+
   useEffect(() => {
     if (!isHydrated || !isAuthenticated) return;
     void refreshList();
-  }, [isHydrated, isAuthenticated, refreshList]);
+    void refreshCollections();
+  }, [isHydrated, isAuthenticated, refreshList, refreshCollections]);
+
+  const toggleUploadColl = (id: string) => {
+    setUploadCollectionIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
+
+  const onCreateCollection = async () => {
+    const n = newCollName.trim();
+    if (!n || collBusy) return;
+    setCollBusy(true);
+    setError(null);
+    try {
+      await createCollection(n, authFetch);
+      setNewCollName("");
+      await refreshCollections();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Не удалось создать коллекцию");
+    } finally {
+      setCollBusy(false);
+    }
+  };
+
+  const onDeleteCollection = async (id: string) => {
+    if (collBusy) return;
+    if (!window.confirm("Удалить коллекцию? Документы останутся, связи с меткой снимутся.")) return;
+    setCollBusy(true);
+    setError(null);
+    try {
+      await deleteCollection(id, authFetch);
+      setUploadCollectionIds((prev) => prev.filter((x) => x !== id));
+      await refreshCollections();
+      await refreshList();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Не удалось удалить коллекцию");
+    } finally {
+      setCollBusy(false);
+    }
+  };
+
+  const onToggleDocCollection = async (doc: DocumentItem, collectionId: string, checked: boolean) => {
+    const cur = new Set(doc.collection_ids ?? []);
+    if (checked) cur.add(collectionId);
+    else cur.delete(collectionId);
+    setError(null);
+    setPatchingDocId(doc.id);
+    try {
+      await setDocumentCollections(doc.id, [...cur], authFetch);
+      await refreshList();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Не удалось обновить коллекции документа");
+    } finally {
+      setPatchingDocId(null);
+    }
+  };
+
+  const collectionLabel = (id: string) => collections.find((c) => c.id === id)?.name ?? id.slice(0, 8);
 
   const docsTotalPages = useMemo(() => {
     if (!docs?.length) return 1;
@@ -96,15 +175,17 @@ export function UploadPanel() {
     setBatchResult(null);
     setBusy(true);
     try {
+      const collOpt =
+        uploadCollectionIds.length > 0 ? { collectionIds: uploadCollectionIds } : undefined;
       if (list.length === 1) {
-        const res = await uploadDocument(list[0], authFetch);
+        const res = await uploadDocument(list[0], authFetch, collOpt);
         setResult(res);
         await refreshList();
         if (isAuthenticated && res.id) {
           navigate(`/workspace/${res.id}`, { replace: false });
         }
       } else {
-        const res = await uploadDocumentBatch(list, authFetch);
+        const res = await uploadDocumentBatch(list, authFetch, collOpt);
         setBatchResult(res);
         await refreshList();
         const first = res.results[0];
@@ -264,13 +345,106 @@ export function UploadPanel() {
           </section>
 
           <aside className="workspace-aside">
+            {canUseMyDocs ? (
+              <section className="collections-card" aria-label="Коллекции">
+                <header className="collections-card__head">
+                  <h2 className="collections-card__title">Коллекции</h2>
+                  <p className="collections-card__hint">
+                    Метки для контекста (работа, учёба, проект). Выбор меток ниже влияет только на следующую загрузку в
+                    зону слева — список «Мои документы» показывает все файлы.
+                  </p>
+                  <details className="collections-more">
+                    <summary>Подробнее про поиск и чат</summary>
+                    <p>
+                      В рабочей области чат и RAG идут по этому файлу и связанным документам одной тематической группы.
+                    </p>
+                  </details>
+                </header>
+
+                <div className="collections-panel">
+                  <h3 className="collections-panel__title">Новая метка</h3>
+                  <div className="collections-create-row">
+                    <input
+                      className="input-bordered collections-create-input"
+                      placeholder="Например: Хакатон 2026"
+                      value={newCollName}
+                      disabled={collBusy}
+                      onChange={(e) => setNewCollName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          void onCreateCollection();
+                        }
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="btn-solid btn-compact collections-create-btn"
+                      disabled={!newCollName.trim() || collBusy}
+                      onClick={() => void onCreateCollection()}
+                    >
+                      {collBusy ? "…" : "Создать"}
+                    </button>
+                  </div>
+                </div>
+
+                {collections.length > 0 ? (
+                  <div className="collections-panel collections-panel--upload">
+                    <h3 className="collections-panel__title">Метки для следующей загрузки</h3>
+                    <p className="collections-panel__hint">Выбранные метки прикрепятся к файлам в зоне слева.</p>
+                    <div className="collections-chip-row" role="group" aria-label="Метки для загрузки">
+                      {collections.map((c) => {
+                        const on = uploadCollectionIds.includes(c.id);
+                        return (
+                          <div
+                            key={`up-${c.id}`}
+                            className={`collections-tag${on ? " collections-tag--selected" : ""}`}
+                          >
+                            <button
+                              type="button"
+                              className="collections-tag__filter"
+                              disabled={busy}
+                              onClick={() => toggleUploadColl(c.id)}
+                              aria-pressed={on}
+                            >
+                              <span className="collections-tag__signal" aria-hidden />
+                              <span className="collections-tag__label">{c.name}</span>
+                            </button>
+                            <button
+                              type="button"
+                              className="collections-tag__remove"
+                              disabled={collBusy}
+                              title={`Удалить коллекцию «${c.name}»`}
+                              aria-label={`Удалить коллекцию ${c.name}`}
+                              onClick={(e) => {
+                                e.preventDefault();
+                                void onDeleteCollection(c.id);
+                              }}
+                            >
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+                                <path d="M18 6L6 18M6 6l12 12" />
+                              </svg>
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : (
+                  <p className="collections-empty">Создайте метку выше — появятся быстрые переключатели для загрузки.</p>
+                )}
+              </section>
+            ) : null}
             <div className="panel-head">
               <h2 className="panel-title">Мои документы</h2>
               <button
                 type="button"
                 className="btn-outline btn-compact"
                 disabled={!canUseMyDocs || busy}
-                onClick={() => void refreshList()}
+                onClick={() => {
+                  void refreshList();
+                  void refreshCollections();
+                }}
               >
                 Обновить
               </button>
@@ -288,31 +462,64 @@ export function UploadPanel() {
                 <ul className="doc-list">
                   {pagedDocs.map((d) => (
                     <li key={d.id}>
-                      <Link to={`/workspace/${d.id}`} className="doc-card" title={d.original_filename}>
-                        <div className="doc-card-top">
-                          <span className="doc-card-name">
+                      <div className="doc-card-wrap">
+                        <Link to={`/workspace/${d.id}`} className="doc-card" title={d.original_filename}>
+                          <div className="doc-card-top">
+                            <span className="doc-card-name">
+                              {d.topic_group_id && (d.group_document_ids?.length ?? 0) > 1 ? (
+                                <span style={{ color: "var(--accent)" }} title="Один набор тем — чат по всем файлам группы">
+                                  🔗{" "}
+                                </span>
+                              ) : null}
+                              {d.original_filename}
+                            </span>
+                            <span className={`status-badge ${statusBadgeClass(d.status)}`}>
+                              {documentStatusRu(d.status)}
+                            </span>
+                          </div>
+                          <div className="doc-card-meta">
+                            <span className="doc-card-meta-line">
+                              {formatBytes(d.size_bytes)} · {formatDocListDate(d.created_at)}
+                            </span>
                             {d.topic_group_id && (d.group_document_ids?.length ?? 0) > 1 ? (
-                              <span style={{ color: "var(--accent)" }} title="Один набор тем — чат по всем файлам группы">
-                                🔗{" "}
+                              <span className="doc-card-meta-line doc-card-meta-line--sub">
+                                Группа · {d.group_document_ids?.length} файлов
                               </span>
                             ) : null}
-                            {d.original_filename}
-                          </span>
-                          <span className={`status-badge ${statusBadgeClass(d.status)}`}>
-                            {documentStatusRu(d.status)}
-                          </span>
-                        </div>
-                        <div className="doc-card-meta">
-                          <span className="doc-card-meta-line">
-                            {formatBytes(d.size_bytes)} · {formatDocListDate(d.created_at)}
-                          </span>
-                          {d.topic_group_id && (d.group_document_ids?.length ?? 0) > 1 ? (
-                            <span className="doc-card-meta-line doc-card-meta-line--sub">
-                              Группа · {d.group_document_ids?.length} файлов
-                            </span>
-                          ) : null}
-                        </div>
-                      </Link>
+                          </div>
+                        </Link>
+                        {collections.length > 0 ? (
+                          <div className="doc-coll-strip">
+                            <div className="doc-coll-tags">
+                              {(d.collection_ids ?? []).length > 0 ? (
+                                (d.collection_ids ?? []).map((cid) => (
+                                  <span key={cid} className="doc-coll-tag" title={collectionLabel(cid)}>
+                                    {collectionLabel(cid)}
+                                  </span>
+                                ))
+                              ) : (
+                                <span className="doc-coll-none">без меток</span>
+                              )}
+                            </div>
+                            <details className="doc-coll-details">
+                              <summary>Изменить метки</summary>
+                              <div className="doc-coll-edit">
+                                {collections.map((c) => (
+                                  <label key={`${d.id}-${c.id}`}>
+                                    <input
+                                      type="checkbox"
+                                      checked={d.collection_ids?.includes(c.id) ?? false}
+                                      disabled={patchingDocId === d.id}
+                                      onChange={(e) => void onToggleDocCollection(d, c.id, e.target.checked)}
+                                    />
+                                    {c.name}
+                                  </label>
+                                ))}
+                              </div>
+                            </details>
+                          </div>
+                        ) : null}
+                      </div>
                     </li>
                   ))}
                 </ul>

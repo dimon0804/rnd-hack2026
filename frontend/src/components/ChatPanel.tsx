@@ -5,6 +5,7 @@ import { listDocuments } from "../api/documents";
 import type { RagChunk } from "../api/rag";
 import { formatRagChunksForLlm, ragQuery, ragQueryBalanced } from "../api/rag";
 import { humanizeChatError } from "../lib/apiError";
+import { hydrateChunkTextsFromDocuments } from "../lib/ragChunkHydrate";
 import { useAuth } from "../context/AuthContext";
 import { SttChatToolbar } from "./SttChatToolbar";
 
@@ -79,9 +80,10 @@ export function ChatPanel() {
       const docNames = Object.fromEntries(myDocs.map((d) => [d.id, d.original_filename]));
       const multi = indexedIds.length > 1;
       const topK = multi ? 12 : 6;
-      const chunks = multi
+      let chunks = multi
         ? await ragQueryBalanced(text, authFetch, topK, indexedIds)
         : await ragQuery(text, authFetch, topK, indexedIds);
+      chunks = await hydrateChunkTextsFromDocuments(chunks, authFetch);
       setLastChunks(chunks);
       const systemPrompt = buildSystemPrompt(chunks, docNames, multi);
       const reply = await aiChat(text, systemPrompt, authFetch, { maxTokens: 1200 });

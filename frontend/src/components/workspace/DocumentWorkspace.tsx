@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import type { DocumentItem } from "../../api/documents";
 import { listDocuments } from "../../api/documents";
 import { aiChat } from "../../api/ai";
-import { formatRagChunksForLlm, ragQueryBalanced, type RagChunk } from "../../api/rag";
+import { formatRagChunksForLlm, ragQuery, ragQueryBalanced, type RagChunk } from "../../api/rag";
 import { documentStatusRu } from "../../lib/documentStatus";
 import {
   generateFlashcards,
@@ -23,6 +23,8 @@ import {
 import { layoutMindmap, parseMindmapText, type MindLayoutNode } from "../../lib/mindmapParse";
 import { prefetchVoices, speakPodcastScript, stopSpeaking } from "../../lib/speech";
 import { humanizeChatError } from "../../lib/apiError";
+import { hydrateChunkTextsFromDocuments } from "../../lib/ragChunkHydrate";
+import { rankChunksForAssistantAnswer } from "../../lib/ragSourceRank";
 import { PROMPT_TEMPLATES, type PromptTemplateId } from "../../lib/promptTemplates";
 import { parseGammaDeckJson } from "../../lib/gammaDeck";
 import { buildDocumentPackageZip } from "../../lib/documentPackageZip";
@@ -188,12 +190,13 @@ export function DocumentWorkspace({ document }: Props) {
     setChatBusy(true);
     try {
       const chatTopK = ragIds.length > 1 ? 12 : 6;
-      const chunks = await ragQueryBalanced(text, authFetch, chatTopK, ragIds);
+      let chunks =
+        ragIds.length > 1
+          ? await ragQueryBalanced(text, authFetch, chatTopK, ragIds)
+          : await ragQuery(text, authFetch, chatTopK, ragIds);
+      chunks = await hydrateChunkTextsFromDocuments(chunks, authFetch);
       const label = (id: string) => docNamesById[id] ?? `файл ${id.slice(0, 8)}…`;
       const ctx = formatRagChunksForLlm(chunks, label, 14000);
-      /** Несколько файлов — до 4 источников; один файл — один чанк (как раньше). */
-      const sourceChunksForUi =
-        chunks.length > 0 ? chunks.slice(0, ragIds.length > 1 ? 4 : 1) : [];
       const scope =
         ragIds.length > 1
           ? "нескольким загруженным файлам (одна тематическая группа)"
@@ -204,6 +207,8 @@ export function DocumentWorkspace({ document }: Props) {
           : "";
       const system = `Помощник по материалам пользователя (${scope}). Отвечай на русском только по приведённому контексту. Если в контексте нет ответа — скажи об этом. Пиши обычным текстом, без markdown (#, **, обратные кавычки).${multiRules}\n\nКонтекст:\n${ctx || "(пусто)"}`;
       const reply = await aiChat(text, system, authFetch, { maxTokens: 1200 });
+      const sourceChunksForUi =
+        chunks.length > 0 ? rankChunksForAssistantAnswer(chunks, reply.content) : [];
       setMessages((m) => [...m, { role: "assistant", content: reply.content, sourceChunks: sourceChunksForUi }]);
     } catch (e) {
       const raw = e instanceof Error ? e.message : "Ошибка";
@@ -221,11 +226,13 @@ export function DocumentWorkspace({ document }: Props) {
     setChatBusy(true);
     try {
       const tplTopK = ragIds.length > 1 ? 12 : 6;
-      const chunks = await ragQueryBalanced(t.ragQuery, authFetch, tplTopK, ragIds);
+      let chunks =
+        ragIds.length > 1
+          ? await ragQueryBalanced(t.ragQuery, authFetch, tplTopK, ragIds)
+          : await ragQuery(t.ragQuery, authFetch, tplTopK, ragIds);
+      chunks = await hydrateChunkTextsFromDocuments(chunks, authFetch);
       const label = (id: string) => docNamesById[id] ?? `файл ${id.slice(0, 8)}…`;
       const ctx = formatRagChunksForLlm(chunks, label, 14000);
-      const sourceChunksForUi =
-        chunks.length > 0 ? chunks.slice(0, ragIds.length > 1 ? 4 : 1) : [];
       const scope =
         ragIds.length > 1
           ? "нескольким загруженным файлам (одна тематическая группа)"
@@ -236,6 +243,8 @@ export function DocumentWorkspace({ document }: Props) {
           : "";
       const system = `Помощник по материалам пользователя (${scope}). Отвечай на русском только по приведённому контексту. Если в контексте нет ответа — скажи об этом. Пиши обычным текстом, без markdown (#, **, обратные кавычки).${multiRules}\n\nКонтекст:\n${ctx || "(пусто)"}`;
       const reply = await aiChat(t.llmInstruction, system, authFetch, { maxTokens: 1400 });
+      const sourceChunksForUi =
+        chunks.length > 0 ? rankChunksForAssistantAnswer(chunks, reply.content) : [];
       setMessages((m) => [...m, { role: "assistant", content: reply.content, sourceChunks: sourceChunksForUi }]);
     } catch (e) {
       const raw = e instanceof Error ? e.message : "Ошибка";
@@ -464,17 +473,25 @@ export function DocumentWorkspace({ document }: Props) {
     setPackageLoading(true);
     try {
       const base = document.original_filename.replace(/\.[^.]+$/, "") || "document";
+      const chatMessages = messages.map((m) => ({ role: m.role, content: m.content }));
       const blob = await buildDocumentPackageZip({
         baseName: document.original_filename,
         ragIds,
         authFetch,
         workspaceUrl: typeof window !== "undefined" ? window.location.href : "",
         summary: summary ?? undefined,
+        topics: topics.length > 0 ? topics : undefined,
+        chatMessages: chatMessages.length > 0 ? chatMessages : undefined,
+        testsText: testsText && testsText.trim() ? testsText : undefined,
+        flashcards: cards.length > 0 ? cards : undefined,
+        mindmapRaw: mindmapRaw && mindmapRaw.trim() ? mindmapRaw : undefined,
+        mindmapLayout: mindmapRoot ?? undefined,
         videoPlan: videoPlan ?? undefined,
         podcastScript: podcastScript ?? undefined,
         infographic: infographic ?? undefined,
         tableCsv: tableCsv && tableCsv.trim() ? tableCsv : undefined,
         presentationBlob: presentationBlob ?? undefined,
+        includeOriginalFiles: true,
       });
       triggerBlobDownload(blob, `${base}-paket.zip`);
     } catch (e) {
@@ -1160,7 +1177,9 @@ export function DocumentWorkspace({ document }: Props) {
 function ChatSourceCitations({ chunks, docLabels }: { chunks: RagChunk[]; docLabels?: Record<string, string> }) {
   return (
     <div className="chat-cites" role="group" aria-label="Источники по индексу RAG">
-      <div className="chat-cites__label">{chunks.length === 1 ? "Источник" : "Источники"}</div>
+      <div className="chat-cites__label">
+        {chunks.length === 1 ? "Источник (текст из индекса)" : "Источники (текст из индекса)"}
+      </div>
       <ul className="chat-cites__list">
         {chunks.map((c, idx) => {
           const key = `${c.document_id}-${c.chunk_id}-${idx}`;

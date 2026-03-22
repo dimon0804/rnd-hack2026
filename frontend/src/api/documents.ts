@@ -29,12 +29,22 @@ function apiBase(): string {
   return import.meta.env.VITE_API_BASE ?? "";
 }
 
+export type CollectionItem = {
+  id: string;
+  name: string;
+  created_at: string;
+};
+
 export async function uploadDocument(
   file: File,
   authFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>,
+  options?: { collectionIds?: string[] },
 ): Promise<DocumentUploadResult> {
   const form = new FormData();
   form.append("file", file);
+  if (options?.collectionIds?.length) {
+    form.append("collection_ids", JSON.stringify(options.collectionIds));
+  }
   const res = await authFetch(`${apiBase()}/api/v1/documents/upload`, {
     method: "POST",
     body: form,
@@ -50,10 +60,14 @@ export async function uploadDocument(
 export async function uploadDocumentBatch(
   files: File[],
   authFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>,
+  options?: { collectionIds?: string[] },
 ): Promise<BatchUploadResult> {
   const form = new FormData();
   for (const f of files) {
     form.append("files", f);
+  }
+  if (options?.collectionIds?.length) {
+    form.append("collection_ids", JSON.stringify(options.collectionIds));
   }
   const res = await authFetch(`${apiBase()}/api/v1/documents/upload-batch`, {
     method: "POST",
@@ -76,6 +90,8 @@ export type DocumentItem = {
   created_at: string;
   topic_group_id?: string | null;
   group_document_ids?: string[];
+  /** Персональные коллекции (папки/контексты), в которых состоит документ. */
+  collection_ids?: string[];
 };
 
 export type MimeTypeStat = {
@@ -127,8 +143,18 @@ export async function fetchDocumentStats(
 
 export async function listDocuments(
   authFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>,
+  params?: { collectionIds?: string[] | null },
 ): Promise<DocumentItem[]> {
-  const res = await authFetch(`${apiBase()}/api/v1/documents`);
+  let url = `${apiBase()}/api/v1/documents`;
+  const ids = params?.collectionIds?.filter(Boolean) ?? [];
+  if (ids.length > 0) {
+    const sp = new URLSearchParams();
+    for (const id of ids) {
+      sp.append("collection_ids", id);
+    }
+    url += `?${sp.toString()}`;
+  }
+  const res = await authFetch(url);
   if (!res.ok) {
     const text = await res.text();
     throw new Error(text || res.statusText);
@@ -166,4 +192,116 @@ export async function reindexDocument(
     throw new Error(text || res.statusText);
   }
   return res.json() as Promise<DocumentUploadResult>;
+}
+
+/** Бинарный оригинал файла (GET …/documents/{id}/file). */
+export async function fetchDocumentFileBlob(
+  id: string,
+  authFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>,
+): Promise<{ blob: Blob; filename: string }> {
+  if (!isDocumentIdFormatValid(id)) {
+    throw new Error("Неверный идентификатор документа.");
+  }
+  const res = await authFetch(`${apiBase()}/api/v1/documents/${encodeURIComponent(id)}/file`, {
+    method: "GET",
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(humanizeDocumentsApiError(res.status, text));
+  }
+  const blob = await res.blob();
+  const cd = res.headers.get("Content-Disposition") ?? "";
+  let filename = "document";
+  const star = /filename\*=(?:UTF-8''|)([^;\s]+)/i.exec(cd);
+  const plain = /filename="([^"]+)"/i.exec(cd) || /filename=([^;\s]+)/i.exec(cd);
+  if (star?.[1]) {
+    try {
+      filename = decodeURIComponent(star[1].replace(/['"]/g, "").trim());
+    } catch {
+      filename = star[1].replace(/['"]/g, "").trim();
+    }
+  } else if (plain?.[1]) {
+    filename = plain[1].replace(/['"]/g, "").trim();
+  }
+  return { blob, filename: filename || "document" };
+}
+
+export async function listCollections(
+  authFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>,
+): Promise<CollectionItem[]> {
+  const res = await authFetch(`${apiBase()}/api/v1/documents/collections`);
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || res.statusText);
+  }
+  return res.json() as Promise<CollectionItem[]>;
+}
+
+export async function createCollection(
+  name: string,
+  authFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>,
+): Promise<CollectionItem> {
+  const res = await authFetch(`${apiBase()}/api/v1/documents/collections`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: name.trim() }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || res.statusText);
+  }
+  return res.json() as Promise<CollectionItem>;
+}
+
+export async function renameCollection(
+  id: string,
+  name: string,
+  authFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>,
+): Promise<CollectionItem> {
+  const res = await authFetch(`${apiBase()}/api/v1/documents/collections/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: name.trim() }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || res.statusText);
+  }
+  return res.json() as Promise<CollectionItem>;
+}
+
+export async function deleteCollection(
+  id: string,
+  authFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>,
+): Promise<void> {
+  const res = await authFetch(`${apiBase()}/api/v1/documents/collections/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || res.statusText);
+  }
+}
+
+export async function setDocumentCollections(
+  documentId: string,
+  collectionIds: string[],
+  authFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>,
+): Promise<DocumentItem> {
+  if (!isDocumentIdFormatValid(documentId)) {
+    throw new Error("Неверный идентификатор документа.");
+  }
+  const res = await authFetch(
+    `${apiBase()}/api/v1/documents/${encodeURIComponent(documentId)}/collections`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ collection_ids: collectionIds }),
+    },
+  );
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(humanizeDocumentsApiError(res.status, text));
+  }
+  return res.json() as Promise<DocumentItem>;
 }
