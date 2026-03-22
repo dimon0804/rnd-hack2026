@@ -2,7 +2,13 @@ import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import type { DocumentItem } from "../../api/documents";
 import { listDocuments } from "../../api/documents";
 import { aiChat } from "../../api/ai";
-import { formatRagChunksForLlm, ragQuery, ragQueryBalanced, type RagChunk } from "../../api/rag";
+import {
+  formatRagChunksForLlm,
+  ragQuery,
+  ragQueryBalanced,
+  type RagChunk,
+  type RagSearchMode,
+} from "../../api/rag";
 import { documentStatusRu } from "../../lib/documentStatus";
 import {
   generateFlashcards,
@@ -70,6 +76,7 @@ export function DocumentWorkspace({ document }: Props) {
   const [loadingInsights, setLoadingInsights] = useState(false);
   const [messages, setMessages] = useState<Msg[]>([]);
   const [chatInput, setChatInput] = useState("");
+  const [ragSearchMode, setRagSearchMode] = useState<RagSearchMode>("semantic");
   const [chatBusy, setChatBusy] = useState(false);
   const [testsText, setTestsText] = useState<string | null>(null);
   const [cards, setCards] = useState<{ q: string; a: string }[]>([]);
@@ -192,8 +199,8 @@ export function DocumentWorkspace({ document }: Props) {
       const chatTopK = ragIds.length > 1 ? 12 : 6;
       let chunks =
         ragIds.length > 1
-          ? await ragQueryBalanced(text, authFetch, chatTopK, ragIds)
-          : await ragQuery(text, authFetch, chatTopK, ragIds);
+          ? await ragQueryBalanced(text, authFetch, chatTopK, ragIds, ragSearchMode)
+          : await ragQuery(text, authFetch, chatTopK, ragIds, ragSearchMode);
       chunks = await hydrateChunkTextsFromDocuments(chunks, authFetch);
       const label = (id: string) => docNamesById[id] ?? `файл ${id.slice(0, 8)}…`;
       const ctx = formatRagChunksForLlm(chunks, label, 14000);
@@ -228,8 +235,8 @@ export function DocumentWorkspace({ document }: Props) {
       const tplTopK = ragIds.length > 1 ? 12 : 6;
       let chunks =
         ragIds.length > 1
-          ? await ragQueryBalanced(t.ragQuery, authFetch, tplTopK, ragIds)
-          : await ragQuery(t.ragQuery, authFetch, tplTopK, ragIds);
+          ? await ragQueryBalanced(t.ragQuery, authFetch, tplTopK, ragIds, ragSearchMode)
+          : await ragQuery(t.ragQuery, authFetch, tplTopK, ragIds, ragSearchMode);
       chunks = await hydrateChunkTextsFromDocuments(chunks, authFetch);
       const label = (id: string) => docNamesById[id] ?? `файл ${id.slice(0, 8)}…`;
       const ctx = formatRagChunksForLlm(chunks, label, 14000);
@@ -741,6 +748,27 @@ export function DocumentWorkspace({ document }: Props) {
                 <code style={styles.codeSm}>STT_BASE_URL</code>, для
                 хакатона часто порт <strong>6640</strong>).
               </p>
+              <div className="chat-search-mode" role="radiogroup" aria-label="Режим поиска по документу">
+                <span className="chat-search-mode__kicker">Поиск</span>
+                <div className="chat-search-mode__segment">
+                  <button
+                    type="button"
+                    className={`chat-search-mode__opt${ragSearchMode === "keyword" ? " chat-search-mode__opt--on" : ""}`}
+                    disabled={!ready || chatBusy || sttBusy}
+                    onClick={() => setRagSearchMode("keyword")}
+                  >
+                    Точное совпадение
+                  </button>
+                  <button
+                    type="button"
+                    className={`chat-search-mode__opt${ragSearchMode === "semantic" ? " chat-search-mode__opt--on" : ""}`}
+                    disabled={!ready || chatBusy || sttBusy}
+                    onClick={() => setRagSearchMode("semantic")}
+                  >
+                    По смыслу
+                  </button>
+                </div>
+              </div>
               <div className="chat-templates" role="group" aria-label="Шаблоны ответа по RAG">
                 <span className="chat-templates__kicker">Шаблоны</span>
                 {(["investor", "student", "slide"] as const).map((tid) => (
