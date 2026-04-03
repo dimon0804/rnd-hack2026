@@ -8,6 +8,7 @@ import { UploadPage } from "./pages/UploadPage";
 import { CabinetPage } from "./pages/CabinetPage";
 import { WorkspacePage } from "./pages/WorkspacePage";
 import { SharedCollectionPage } from "./pages/SharedCollectionPage";
+import { SimulatorPage } from "./pages/SimulatorPage";
 
 export function App() {
   return (
@@ -15,6 +16,7 @@ export function App() {
       <Routes>
         <Route element={<Layout />}>
           <Route path="/" element={<HomePage />} />
+          <Route path="/simulator" element={<SimulatorPage />} />
           <Route path="/share/:token" element={<SharedCollectionPage />} />
           <Route path="/login" element={<AuthPage mode="login" />} />
           <Route path="/register" element={<AuthPage mode="register" />} />

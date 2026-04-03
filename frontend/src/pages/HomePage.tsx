@@ -31,6 +31,9 @@ export function HomePage() {
             из сети.
           </p>
           <div className="hero-cta-row">
+            <Link to="/simulator" className="btn-outline btn-cta">
+              Тренажёр безопасности (API)
+            </Link>
             {isHydrated && isAuthenticated ? (
               <Link to="/upload" className="btn-solid btn-cta">
                 Загрузить документы
@@ -63,9 +66,12 @@ export function HomePage() {
               <h2>Ответы по смыслу</h2>
               <p>Система опирается на загруженные материалы, а не на произвольные страницы из сети.</p>
             </article>
-            <article className="home-card home-card--soon">
-              <h2>Скоро</h2>
-              <p>Краткие конспекты, карточки для повторения и проверка знаний.</p>
+            <article className="home-card">
+              <h2>Тренажёр безопасности</h2>
+              <p>
+                Сценарии фишинга и социнженерии через реальные эндпоинты gateway — без Swagger, на странице{" "}
+                <Link to="/simulator">/simulator</Link>.
+              </p>
             </article>
           </div>
         </div>

@@ -51,6 +51,9 @@ export function AppHeader() {
             </span>
           ) : isAuthenticated ? (
             <>
+              <Link to="/simulator" className="btn-text">
+                Тренажёр SOC
+              </Link>
               <Link to="/cabinet" className="btn-text">
                 Кабинет
               </Link>
@@ -66,6 +69,9 @@ export function AppHeader() {
             </>
           ) : (
             <>
+              <Link to="/simulator" className="btn-text">
+                Тренажёр SOC
+              </Link>
               <Link to="/login" className="btn-text">
                 Войти
               </Link>

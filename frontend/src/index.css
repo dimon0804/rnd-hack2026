@@ -5437,3 +5437,299 @@ select.input-select option {
     grid-template-columns: 1fr;
   }
 }
+
+/* --- Тренажёр безопасности (simulator API) --- */
+.simulator-page .simulator-code {
+  font-size: 0.82em;
+  padding: 0.1em 0.35em;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--surface) 70%, var(--border));
+  overflow-wrap: anywhere;
+}
+
+.simulator-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1rem;
+  margin-bottom: 1.25rem;
+}
+
+.simulator-toolbar__label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.simulator-lang {
+  display: inline-flex;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+  overflow: hidden;
+}
+
+.simulator-lang__btn {
+  padding: 0.35rem 0.75rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.simulator-lang__btn:hover {
+  color: var(--text);
+}
+
+.simulator-lang__btn--active {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: var(--accent);
+}
+
+.simulator-error {
+  padding: 0.85rem 1rem;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, #ef4444 45%, var(--border));
+  background: color-mix(in srgb, #ef4444 12%, var(--surface));
+  font-size: 0.9rem;
+}
+
+.simulator-scenario-tabs {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+@media (min-width: 640px) {
+  .simulator-scenario-tabs {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+}
+
+.simulator-tab {
+  flex: 1 1 auto;
+  min-width: min(100%, 12rem);
+  text-align: left;
+  padding: 0.85rem 1rem;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.simulator-tab:hover {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+}
+
+.simulator-tab--active {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+.simulator-tab__type {
+  display: block;
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  margin-bottom: 0.25rem;
+}
+
+.simulator-tab__title {
+  display: block;
+  font-weight: 700;
+  font-size: 0.95rem;
+}
+
+.simulator-tab__id {
+  display: block;
+  font-size: 0.72rem;
+  color: var(--muted);
+  font-family: ui-monospace, monospace;
+  margin-top: 0.35rem;
+}
+
+.simulator-mail__meta {
+  font-size: 0.88rem;
+  margin: 0 0 0.5rem;
+  color: var(--muted);
+}
+
+.simulator-mail__subject {
+  margin: 0 0 0.35rem;
+  font-size: 1.15rem;
+}
+
+.simulator-mail__preview {
+  margin: 0 0 1rem;
+  font-size: 0.88rem;
+  color: var(--muted);
+}
+
+.simulator-mail__body p {
+  margin: 0 0 0.65rem;
+  line-height: 1.55;
+}
+
+.simulator-mail__cta {
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px dashed color-mix(in srgb, var(--border) 80%, transparent);
+}
+
+.simulator-mail__cta-fake {
+  pointer-events: none;
+  opacity: 0.9;
+  display: inline-block;
+}
+
+.simulator-mail__href {
+  display: block;
+  margin-top: 0.5rem;
+  font-size: 0.78rem;
+}
+
+.simulator-chat__peer {
+  margin: 0 0 1rem;
+  font-weight: 700;
+}
+
+.simulator-chat__handle {
+  font-weight: 500;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.simulator-chat__messages {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.simulator-chat__bubble {
+  max-width: 92%;
+  padding: 0.65rem 0.85rem;
+  border-radius: 14px;
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.simulator-chat__bubble--peer {
+  align-self: flex-start;
+  background: color-mix(in srgb, var(--accent) 18%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+.simulator-chat__bubble--me {
+  align-self: flex-end;
+  background: color-mix(in srgb, var(--border) 40%, var(--surface));
+}
+
+.simulator-chat__bubble p {
+  margin: 0;
+}
+
+.simulator-chat__time {
+  display: block;
+  margin-top: 0.35rem;
+  font-size: 0.65rem;
+  opacity: 0.75;
+}
+
+.simulator-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.simulator-choice-btn {
+  font-size: 0.88rem;
+}
+
+.simulator-result__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  align-items: baseline;
+  margin: 0 0 0.5rem;
+  font-size: 0.9rem;
+}
+
+.simulator-result__k {
+  min-width: 8rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+
+.simulator-result__ok {
+  color: #22c55e;
+  font-weight: 700;
+}
+
+.simulator-result__bad {
+  color: #ef4444;
+  font-weight: 700;
+}
+
+.simulator-result__teach {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+}
+
+.simulator-result__teach h4 {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+}
+
+.simulator-result__teach p {
+  margin: 0;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+.simulator-result__cons {
+  margin-top: 1rem;
+  font-size: 0.88rem;
+}
+
+.simulator-result__cons ol {
+  margin: 0.5rem 0 0;
+  padding-left: 1.25rem;
+}
+
+.simulator-result__cons li {
+  margin-bottom: 0.4rem;
+}
+
+.simulator-result__raw {
+  margin-top: 1rem;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.simulator-result__raw pre {
+  margin: 0.5rem 0 0;
+  padding: 0.75rem;
+  border-radius: 8px;
+  overflow: auto;
+  background: color-mix(in srgb, var(--surface) 88%, var(--border));
+  font-size: 0.75rem;
+}
+
+.simulator-json {
+  margin: 0;
+  padding: 1rem;
+  border-radius: 10px;
+  overflow: auto;
+  font-size: 0.78rem;
+  background: color-mix(in srgb, var(--surface) 88%, var(--border));
+}
