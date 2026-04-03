@@ -1,0 +1,66 @@
+{
+  "meta": {
+    "title": "Cyber Drill — attack simulator"
+  },
+  "nav": {
+    "hub": "Hub",
+    "mail": "Mail",
+    "chat": "Chat",
+    "profile": "Profile"
+  },
+  "dashboard": {
+    "headline": "Awareness drill",
+    "sub": "Realistic scenarios. Instant feedback. Mistakes hurt — visually.",
+    "securityBar": "Security level",
+    "xp": "XP",
+    "level": "Level {n}",
+    "scenarios": "Scenarios",
+    "open": "Open",
+    "badgeEmail": "Phishing",
+    "badgeChat": "Social engineering"
+  },
+  "mail": {
+    "inbox": "Inbox",
+    "spam": "Spam",
+    "drafts": "Drafts",
+    "searchPlaceholder": "Search mail…",
+    "primary": "Primary",
+    "promotions": "Promotions"
+  },
+  "chat": {
+    "online": "online",
+    "typeMessage": "Message…",
+    "voice": "Voice",
+    "attach": "Attach"
+  },
+  "scenario": {
+    "yourMove": "Your move",
+    "choose": "Pick an action — feedback is immediate.",
+    "loading": "Loading scenario…",
+    "error": "Could not load. Check API gateway.",
+    "retry": "Retry",
+    "nextScenario": "More scenarios",
+    "consequenceTitle": "What happened",
+    "teachTitle": "Breakdown",
+    "step": "Step {n}",
+    "close": "Close",
+    "continue": "Continue",
+    "gotIt": "Got it"
+  },
+  "profile": {
+    "title": "Player profile",
+    "accuracy": "Decision accuracy",
+    "mistakes": "Critical mistakes",
+    "completed": "Scenarios completed",
+    "streak": "Streak without critical fails",
+    "securityNow": "Security now",
+    "levelLabel": "Level",
+    "xpLabel": "Experience",
+    "reset": "Reset local progress",
+    "totalChoices": "Total decisions"
+  },
+  "theme": {
+    "light": "Light",
+    "dark": "Dark"
+  }
+}
