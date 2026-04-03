@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     api_gateway_port: int = Field(default=8000, alias="API_GATEWAY_PORT")
 
     cors_origins: str = Field(
-        default="http://localhost:3000,http://localhost",
+        default="http://localhost:3000,http://localhost:3001,http://localhost",
         alias="CORS_ORIGINS",
     )
     rate_limit_per_minute: int = Field(default=120, alias="RATE_LIMIT_PER_MINUTE")
